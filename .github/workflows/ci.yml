@@ -71,9 +71,12 @@ jobs:
       ZKB_FRONTEND_API_KEY: ci-only-frontend-secret-not-for-production
       ZKB_ADMIN_USERS_JSON: ci-only-local-users-placeholder
       ZKB_ADMIN_SESSION_SECRET: ci-only-session-secret-0123456789abcdef0123456789abcdef
+      ZKB_GRAFANA_ADMIN_PASSWORD: ci-only-grafana-secret-not-for-production
     steps:
       - uses: actions/checkout@v7
       - run: docker compose config --quiet
       - run: docker compose --profile ha config --quiet
       - run: docker compose --profile security config --quiet
+      - run: docker compose --profile observability config --quiet
       - run: docker compose --profile ha --profile security config --quiet
+      - run: docker compose --profile ha --profile security --profile observability config --quiet

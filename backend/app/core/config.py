@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
 
+    otel_service_name: str = "zknowbase"
+    otel_exporter_otlp_endpoint: str | None = None
+    otel_export_timeout_seconds: float = Field(default=5.0, ge=0.1, le=30.0)
+    metrics_enabled: bool = True
+
     request_timeout_seconds: float = 90.0
 
     @model_validator(mode="after")
@@ -75,6 +80,10 @@ class Settings(BaseSettings):
             raise ValueError(
                 "ZKB_BACKUP_ENCRYPTION_KEY_FILE is required when ZKB_BACKUP_REQUIRE_ENCRYPTION=true"
             )
+        if self.otel_exporter_otlp_endpoint and not self.otel_exporter_otlp_endpoint.startswith(
+            ("http://", "https://")
+        ):
+            raise ValueError("ZKB_OTEL_EXPORTER_OTLP_ENDPOINT must use http:// or https://")
         return self
 
     def ensure_paths(self) -> None:

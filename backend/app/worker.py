@@ -8,6 +8,7 @@ from uuid import uuid4
 from app.core.config import get_settings
 from app.ingestion_service import process_ingestion_job
 from app.maintenance import async_mutation_lock
+from app.observability import INGESTION_FAILURES, INGESTION_JOBS, configure_tracing, tracer
 from app.store_factory import document_store, ingestion_queue
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -42,6 +43,8 @@ def _reap_and_reconcile(queue, settings) -> None:
             record.error = job.error or "job lease expired"
             record.updated_at = docs.now()
             docs.upsert(record)
+            INGESTION_FAILURES.inc()
+            INGESTION_JOBS.labels(outcome="lease_expired_failed").inc()
             logger.error(
                 "ingestion_lease_expired_terminal job_id=%s document_id=%s tenant_id=%s",
                 job.id,
@@ -53,6 +56,7 @@ def _reap_and_reconcile(queue, settings) -> None:
             record.error = "worker lease expired; retry queued"
             record.updated_at = docs.now()
             docs.upsert(record)
+            INGESTION_JOBS.labels(outcome="lease_expired_requeued").inc()
             logger.warning(
                 "ingestion_lease_expired_requeued job_id=%s document_id=%s tenant_id=%s attempt=%s/%s",
                 job.id,
@@ -64,62 +68,71 @@ def _reap_and_reconcile(queue, settings) -> None:
 
 
 async def _run_job(queue, job, worker_id: str, settings) -> None:
-    processing = asyncio.create_task(process_ingestion_job(job, settings))
-    heartbeat = asyncio.create_task(
-        _heartbeat(queue, job.id, worker_id, settings.worker_lease_seconds)
-    )
-    try:
-        done, _pending = await asyncio.wait(
-            {processing, heartbeat},
-            return_when=asyncio.FIRST_COMPLETED,
+    with tracer("zknowbase.worker").start_as_current_span("ingestion.process") as span:
+        span.set_attribute("tenant.id", job.tenant_id)
+        span.set_attribute("ingestion.job_id", job.id)
+        span.set_attribute("ingestion.document_id", job.document_id)
+        processing = asyncio.create_task(process_ingestion_job(job, settings))
+        heartbeat = asyncio.create_task(
+            _heartbeat(queue, job.id, worker_id, settings.worker_lease_seconds)
         )
-        if heartbeat in done:
-            heartbeat.result()
-            raise RuntimeError("Ingestion heartbeat stopped unexpectedly")
+        try:
+            done, _pending = await asyncio.wait(
+                {processing, heartbeat},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if heartbeat in done:
+                heartbeat.result()
+                raise RuntimeError("Ingestion heartbeat stopped unexpectedly")
 
-        result = processing.result()
-        if not queue.complete(job.id, worker_id):
-            raise RuntimeError("Ingestion job completion rejected after lease loss")
-        logger.info(
-            "ingestion_completed job_id=%s document_id=%s tenant_id=%s chunks=%s",
-            job.id,
-            result.id,
-            job.tenant_id,
-            result.chunk_count,
-        )
-    except Exception as exc:
-        if not processing.done():
-            processing.cancel()
-            with suppress(asyncio.CancelledError):
-                await processing
+            result = processing.result()
+            if not queue.complete(job.id, worker_id):
+                raise RuntimeError("Ingestion job completion rejected after lease loss")
+            INGESTION_JOBS.labels(outcome="completed").inc()
+            logger.info(
+                "ingestion_completed job_id=%s document_id=%s tenant_id=%s chunks=%s",
+                job.id,
+                result.id,
+                job.tenant_id,
+                result.chunk_count,
+            )
+        except Exception as exc:
+            if not processing.done():
+                processing.cancel()
+                with suppress(asyncio.CancelledError):
+                    await processing
 
-        transitioned = False
-        with suppress(Exception):
-            transitioned = queue.fail(job.id, worker_id, str(exc))
-        if transitioned:
+            transitioned = False
             with suppress(Exception):
-                current = queue.get(job.id)
-                docs = document_store(settings)
-                record = _tenant_document(docs, job)
-                if record is not None and current is not None and current.tenant_id == job.tenant_id:
-                    record.status = "queued" if current.status == "queued" else "failed"
-                    record.error = str(exc)[:4000]
-                    record.updated_at = docs.now()
-                    docs.upsert(record)
-        logger.exception(
-            "ingestion_failed job_id=%s document_id=%s tenant_id=%s",
-            job.id,
-            job.document_id,
-            job.tenant_id,
-        )
-    finally:
-        heartbeat.cancel()
-        with suppress(asyncio.CancelledError):
-            await heartbeat
+                transitioned = queue.fail(job.id, worker_id, str(exc))
+            if transitioned:
+                INGESTION_JOBS.labels(outcome="failed_or_requeued").inc()
+                with suppress(Exception):
+                    current = queue.get(job.id)
+                    docs = document_store(settings)
+                    record = _tenant_document(docs, job)
+                    if record is not None and current is not None and current.tenant_id == job.tenant_id:
+                        record.status = "queued" if current.status == "queued" else "failed"
+                        record.error = str(exc)[:4000]
+                        record.updated_at = docs.now()
+                        docs.upsert(record)
+                        if current.status == "failed":
+                            INGESTION_FAILURES.inc()
+            logger.exception(
+                "ingestion_failed job_id=%s document_id=%s tenant_id=%s",
+                job.id,
+                job.document_id,
+                job.tenant_id,
+            )
+        finally:
+            heartbeat.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat
 
 
 async def run_worker() -> None:
     settings = get_settings()
+    configure_tracing(settings)
     queue = ingestion_queue(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex[:8]}"
     logger.info(
@@ -128,12 +141,11 @@ async def run_worker() -> None:
         settings.metadata_backend,
     )
     while True:
-        # Hold a shared lock from queue mutation through indexing completion.
-        # Backup/restore takes the exclusive form of this same filesystem lock.
         async with async_mutation_lock(settings.maintenance_lock_path, exclusive=False):
             _reap_and_reconcile(queue, settings)
             job = queue.claim_next(worker_id, settings.worker_lease_seconds)
             if job is not None:
+                INGESTION_JOBS.labels(outcome="claimed").inc()
                 logger.info(
                     "ingestion_claimed job_id=%s document_id=%s tenant_id=%s attempt=%s/%s",
                     job.id,

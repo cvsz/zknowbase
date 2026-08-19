@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 
 from app.core.config import Settings, get_settings
+from app.observability import AUTH_FAILURES, AUTHORIZATION_DENIALS
 from app.store_factory import security_store
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -32,6 +33,7 @@ def authenticate_principal(
     resource = f"{request.method} {request.url.path}"
 
     if not supplied:
+        AUTH_FAILURES.inc()
         store.audit(None, None, "authenticate", resource, "denied", "missing API key")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -52,6 +54,7 @@ def authenticate_principal(
 
     key = store.verify(supplied)
     if key is None:
+        AUTH_FAILURES.inc()
         store.audit(
             None,
             store.token_prefix(supplied),
@@ -84,6 +87,7 @@ def require_scopes(*required: str):
     ) -> Principal:
         missing = [scope for scope in required if not principal.has_scope(scope)]
         if missing:
+            AUTHORIZATION_DENIALS.labels(reason="scope").inc()
             security_store(settings).audit(
                 principal.id,
                 principal.key_prefix,

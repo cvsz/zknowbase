@@ -59,6 +59,42 @@ services:
     volumes:
       - clamav_data:/var/lib/clamav
 
+  otel-collector:
+    image: otel/opentelemetry-collector:0.132.0
+    profiles: ["observability"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./ops/observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["observability"]
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./ops/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    profiles: ["observability"]
+    depends_on:
+      - prometheus
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./ops/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000"
+    restart: unless-stopped
+
   backend:
     build: ./backend
     restart: unless-stopped
@@ -89,6 +125,10 @@ services:
       ZKB_LLM_MODEL: ${ZKB_LLM_MODEL:-qwen2.5:3b}
       ZKB_OLLAMA_BASE_URL: http://ollama:11434
       ZKB_OPENAI_BASE_URL: ${ZKB_OPENAI_BASE_URL:-https://api.openai.com/v1}
+      ZKB_METRICS_ENABLED: ${ZKB_METRICS_ENABLED:-true}
+      ZKB_OTEL_SERVICE_NAME: ${ZKB_OTEL_SERVICE_NAME:-zknowbase-backend}
+      ZKB_OTEL_EXPORTER_OTLP_ENDPOINT: ${ZKB_OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      ZKB_OTEL_EXPORT_TIMEOUT_SECONDS: ${ZKB_OTEL_EXPORT_TIMEOUT_SECONDS:-5}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -131,6 +171,9 @@ services:
       ZKB_WORKER_POLL_SECONDS: ${ZKB_WORKER_POLL_SECONDS:-1.0}
       ZKB_WORKER_LEASE_SECONDS: ${ZKB_WORKER_LEASE_SECONDS:-300}
       ZKB_INGESTION_JOB_MAX_ATTEMPTS: ${ZKB_INGESTION_JOB_MAX_ATTEMPTS:-3}
+      ZKB_OTEL_SERVICE_NAME: ${ZKB_OTEL_SERVICE_NAME_WORKER:-zknowbase-worker}
+      ZKB_OTEL_EXPORTER_OTLP_ENDPOINT: ${ZKB_OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      ZKB_OTEL_EXPORT_TIMEOUT_SECONDS: ${ZKB_OTEL_EXPORT_TIMEOUT_SECONDS:-5}
     volumes:
       - backend_data:/data
 
@@ -154,3 +197,5 @@ volumes:
   backend_data:
   postgres_data:
   clamav_data:
+  prometheus_data:
+  grafana_data:

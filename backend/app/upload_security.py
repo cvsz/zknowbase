@@ -7,6 +7,7 @@ from typing import Any
 from pypdf import PdfReader
 
 from app.core.config import Settings
+from app.observability import UPLOAD_SCAN_DURATION, UPLOAD_SCAN_FAILURES, timed, tracer
 from app.rag.loaders import ALLOWED_SUFFIXES
 
 
@@ -170,13 +171,21 @@ class UploadSecurity:
         self.settings = settings
 
     async def inspect(self, filename: str, data: bytes) -> None:
-        if self.settings.malware_scan_mode == "clamav":
-            await ClamAVClient(
-                self.settings.clamav_host,
-                self.settings.clamav_port,
-                self.settings.clamav_timeout_seconds,
-            ).scan(data)
-        validate_document_bytes(filename, data)
+        mode = self.settings.malware_scan_mode
+        try:
+            with tracer("zknowbase.upload").start_as_current_span("upload.inspect"), timed(
+                UPLOAD_SCAN_DURATION, {"mode": mode}
+            ):
+                if mode == "clamav":
+                    await ClamAVClient(
+                        self.settings.clamav_host,
+                        self.settings.clamav_port,
+                        self.settings.clamav_timeout_seconds,
+                    ).scan(data)
+                validate_document_bytes(filename, data)
+        except Exception:
+            UPLOAD_SCAN_FAILURES.labels(mode=mode).inc()
+            raise
 
     async def scanner_status(self) -> str:
         if self.settings.malware_scan_mode != "clamav":
