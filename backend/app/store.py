@@ -7,8 +7,9 @@ from app.models.schemas import DocumentRecord
 
 
 class DocumentStore:
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, default_tenant_id: str = "default"):
         self.db_path = db_path
+        self.default_tenant_id = default_tenant_id
         self._lock = threading.RLock()
         self._init_db()
 
@@ -25,6 +26,7 @@ class DocumentStore:
                 """
                 CREATE TABLE IF NOT EXISTS documents (
                   id TEXT PRIMARY KEY,
+                  tenant_id TEXT NOT NULL DEFAULT 'default',
                   name TEXT NOT NULL,
                   source_type TEXT NOT NULL,
                   source_uri TEXT,
@@ -38,6 +40,11 @@ class DocumentStore:
                 )
                 """
             )
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(documents)").fetchall()}
+            if "tenant_id" not in columns:
+                conn.execute("ALTER TABLE documents ADD COLUMN tenant_id TEXT")
+                conn.execute("UPDATE documents SET tenant_id=? WHERE tenant_id IS NULL", (self.default_tenant_id,))
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_tenant_created ON documents(tenant_id, created_at DESC)")
             conn.commit()
 
     def upsert(self, record: DocumentRecord) -> DocumentRecord:
@@ -48,10 +55,10 @@ class DocumentStore:
             conn.execute(
                 """
                 INSERT INTO documents
-                (id,name,source_type,source_uri,content_type,status,chunk_count,size_bytes,created_at,updated_at,error)
-                VALUES (:id,:name,:source_type,:source_uri,:content_type,:status,:chunk_count,:size_bytes,:created_at,:updated_at,:error)
+                (id,tenant_id,name,source_type,source_uri,content_type,status,chunk_count,size_bytes,created_at,updated_at,error)
+                VALUES (:id,:tenant_id,:name,:source_type,:source_uri,:content_type,:status,:chunk_count,:size_bytes,:created_at,:updated_at,:error)
                 ON CONFLICT(id) DO UPDATE SET
-                  name=excluded.name, source_type=excluded.source_type,
+                  tenant_id=excluded.tenant_id, name=excluded.name, source_type=excluded.source_type,
                   source_uri=excluded.source_uri, content_type=excluded.content_type,
                   status=excluded.status, chunk_count=excluded.chunk_count,
                   size_bytes=excluded.size_bytes, updated_at=excluded.updated_at,
@@ -62,19 +69,22 @@ class DocumentStore:
             conn.commit()
         return record
 
-    def get(self, doc_id: str) -> DocumentRecord | None:
+    def get(self, doc_id: str, tenant_id: str | None = None) -> DocumentRecord | None:
+        tenant_id = tenant_id or self.default_tenant_id
         with self._lock, self._connect() as conn:
-            row = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
+            row = conn.execute("SELECT * FROM documents WHERE id=? AND tenant_id=?", (doc_id, tenant_id)).fetchone()
         return self._to_model(row) if row else None
 
-    def list(self) -> list[DocumentRecord]:
+    def list(self, tenant_id: str | None = None) -> list[DocumentRecord]:
+        tenant_id = tenant_id or self.default_tenant_id
         with self._lock, self._connect() as conn:
-            rows = conn.execute("SELECT * FROM documents ORDER BY created_at DESC").fetchall()
+            rows = conn.execute("SELECT * FROM documents WHERE tenant_id=? ORDER BY created_at DESC", (tenant_id,)).fetchall()
         return [self._to_model(row) for row in rows]
 
-    def delete(self, doc_id: str) -> bool:
+    def delete(self, doc_id: str, tenant_id: str | None = None) -> bool:
+        tenant_id = tenant_id or self.default_tenant_id
         with self._lock, self._connect() as conn:
-            cur = conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
+            cur = conn.execute("DELETE FROM documents WHERE id=? AND tenant_id=?", (doc_id, tenant_id))
             conn.commit()
             return cur.rowcount > 0
 
