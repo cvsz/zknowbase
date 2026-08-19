@@ -8,3 +8,4 @@ qdrant-client==1.15.1
 pypdf==6.0.0
 beautifulsoup4==4.13.4
 langchain-text-splitters==0.3.9
+psycopg[binary,pool]==3.3.4
