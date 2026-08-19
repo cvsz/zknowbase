@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookieSecure, sameOrigin } from "@/lib/admin-auth";
+import { cookieSecure } from "@/lib/admin-auth";
 import {
   OIDC_STATE_COOKIE,
   discover,
@@ -9,9 +9,6 @@ import {
 } from "@/lib/oidc";
 
 export async function GET(request: NextRequest) {
-  if (!sameOrigin(request.headers)) {
-    return Response.json({ detail: "Origin rejected" }, { status: 403 });
-  }
   try {
     const config = oidcConfig();
     if (!config) return Response.json({ detail: "OIDC login is not configured" }, { status: 404 });
