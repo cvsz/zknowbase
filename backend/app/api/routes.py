@@ -299,7 +299,8 @@ def create_service_key(
         "service_key.create",
         record.id,
         "success",
-        f"tenant={record.tenant_id};name={record.name};scopes={','.join(record.scopes)}",
+        f"name={record.name};scopes={','.join(record.scopes)}",
+        tenant_id=record.tenant_id,
     )
     return ServiceKeyCreateResponse(key=record, secret=raw_key)
 
@@ -336,7 +337,8 @@ def rotate_service_key(
         "service_key.rotate",
         key_id,
         "success",
-        f"tenant={record.tenant_id};replacement={record.id}",
+        f"replacement={record.id}",
+        tenant_id=record.tenant_id,
     )
     return ServiceKeyCreateResponse(key=record, secret=raw_key)
 
@@ -359,7 +361,7 @@ def revoke_service_key(
         "service_key.revoke",
         key_id,
         "success",
-        f"tenant={current.tenant_id}",
+        tenant_id=current.tenant_id,
     )
 
 
@@ -369,7 +371,8 @@ def list_security_audit(
     principal: Principal = Depends(require_scopes("audit:read")),
     settings: Settings = Depends(get_settings),
 ) -> list[AuditRecord]:
-    return security_store(settings).list_audit(limit, tenant_id=principal.tenant_id)
+    tenant_id = None if principal.bootstrap else principal.tenant_id
+    return security_store(settings).list_audit(limit, tenant_id=tenant_id)
 
 
 router.include_router(read_secure)

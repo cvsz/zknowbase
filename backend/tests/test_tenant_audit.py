@@ -25,6 +25,7 @@ def _record_tenant_events(store: TenantSecurityStore):
         "tenant.test",
         "resource-a",
         "success",
+        tenant_id="tenant-a",
     )
     event_b = store.audit(
         key_b.id,
@@ -32,6 +33,7 @@ def _record_tenant_events(store: TenantSecurityStore):
         "tenant.test",
         "resource-b",
         "success",
+        tenant_id="tenant-b",
     )
     return key_a, key_b, event_a, event_b
 
@@ -52,6 +54,8 @@ def test_sqlite_audit_reads_are_tenant_scoped(tmp_path):
     assert event_b.id not in {event.id for event in tenant_a}
     assert event_b.id in {event.id for event in tenant_b}
     assert event_a.id not in {event.id for event in tenant_b}
+    assert all(event.tenant_id == "tenant-a" for event in tenant_a)
+    assert all(event.tenant_id == "tenant-b" for event in tenant_b)
     assert all(event.principal_id != key_b.id for event in tenant_a)
     assert all(event.principal_id != key_a.id for event in tenant_b)
 
@@ -72,6 +76,7 @@ def test_anonymous_audit_events_are_not_attributed_to_a_tenant(tmp_path):
         "missing API key",
     )
 
+    assert anonymous.tenant_id is None
     assert anonymous.id not in {
         event.id for event in store.list_audit(100, tenant_id="default")
     }
@@ -95,10 +100,37 @@ def test_legacy_key_audit_is_mapped_to_default_tenant(tmp_path):
     )
 
     events = store.list_audit(100, tenant_id="migration-tenant")
-    assert legacy_event.id in {event.id for event in events}
+    loaded = next(event for event in events if event.id == legacy_event.id)
+    assert loaded.tenant_id == "migration-tenant"
     assert legacy_event.id not in {
         event.id for event in store.list_audit(100, tenant_id="other-tenant")
     }
+
+
+def test_explicit_target_tenant_overrides_bootstrap_actor(tmp_path):
+    db_path = tmp_path / "audit.db"
+    store = TenantSecurityStore(
+        SecurityStore(db_path),
+        default_tenant_id="default",
+        sqlite_path=str(db_path),
+    )
+    event = store.audit(
+        "bootstrap",
+        "bootstrap",
+        "service_key.rotate",
+        "key-b",
+        "success",
+        tenant_id="tenant-b",
+    )
+
+    assert event.tenant_id == "tenant-b"
+    assert event.id in {
+        item.id for item in store.list_audit(100, tenant_id="tenant-b")
+    }
+    assert event.id not in {
+        item.id for item in store.list_audit(100, tenant_id="default")
+    }
+    assert event.id in {item.id for item in store.list_audit(100)}
 
 
 @pytest.mark.skipif(
@@ -115,15 +147,15 @@ def test_postgres_audit_reads_are_tenant_scoped():
             postgres_pool=pool,
         )
         _key_a, _key_b, event_a, event_b = _record_tenant_events(store)
-        tenant_a_ids = {
-            event.id for event in store.list_audit(100, tenant_id="tenant-a")
-        }
-        tenant_b_ids = {
-            event.id for event in store.list_audit(100, tenant_id="tenant-b")
-        }
+        tenant_a = store.list_audit(100, tenant_id="tenant-a")
+        tenant_b = store.list_audit(100, tenant_id="tenant-b")
+        tenant_a_ids = {event.id for event in tenant_a}
+        tenant_b_ids = {event.id for event in tenant_b}
         assert event_a.id in tenant_a_ids
         assert event_b.id not in tenant_a_ids
         assert event_b.id in tenant_b_ids
         assert event_a.id not in tenant_b_ids
+        assert all(event.tenant_id == "tenant-a" for event in tenant_a)
+        assert all(event.tenant_id == "tenant-b" for event in tenant_b)
     finally:
         pool.close()
