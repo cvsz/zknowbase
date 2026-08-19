@@ -177,10 +177,10 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 ### S17 — Production release evidence
 - [x] real Postgres integration is exercised in CI
 - [x] real Qdrant shared-collection lifecycle is exercised in CI with cross-tenant search/delete negative coverage
-- [ ] representative production E2E retrieval/ingestion validation documented
-- [ ] backup/restore DR drill evidence recorded, not only the runbook procedure
-- [ ] bounded load/performance evidence recorded against a representative local workload
-- [ ] final dependency/security/secrets audit evidence recorded
+- [x] representative production E2E retrieval/ingestion validation documented
+- [x] backup/restore DR drill evidence recorded, not only the runbook procedure
+- [x] bounded load/performance evidence recorded against a representative local workload
+- [x] final dependency/security/secrets audit evidence recorded
 - [ ] final operational/deployment/security documentation audit complete
 - [ ] changelog/release notes and release version/tag complete
 
@@ -196,13 +196,13 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] OpenTelemetry traces/metrics and local SLO dashboards.
 - [x] Backup/restore runbook for SQLite/Postgres and Qdrant snapshots.
 - [ ] zworkforce native module wiring after consumer-side interface review.
-- [ ] production E2E, DR-drill, performance, security-audit, and release evidence.
+- [ ] documentation-audit, cross-repository integration, and release evidence.
 
 ## Acceptance gates
 - `pytest` backend tests green.
 - Python syntax/import validation green.
 - Frontend local-auth/OIDC tests and `npm run build` green.
-- Docker Compose default, `ha`, `security`, `observability`, and combined local profiles validate.
+- Docker Compose default, `ha`, `security`, `observability`, `ops`, and combined local profiles validate.
 - Postgres integration tests run against an actual local Postgres service in CI.
 - Qdrant lifecycle tests run against an actual pinned local Qdrant service in CI.
 - Durable queue tests prove FIFO claim, worker ownership, retries, cancel, and completion.
