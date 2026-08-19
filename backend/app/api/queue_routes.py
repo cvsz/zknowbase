@@ -11,6 +11,7 @@ from app.models.schemas import (
     IngestionJobRecord,
     UrlIngestRequest,
 )
+from app.observability import INGESTION_JOBS
 from app.rag.loaders import ALLOWED_SUFFIXES
 from app.store_factory import document_store, ingestion_queue
 
@@ -65,6 +66,7 @@ async def enqueue_file(
             settings.ingestion_job_max_attempts,
             tenant_id=principal.tenant_id,
         )
+        INGESTION_JOBS.labels(outcome="enqueued").inc()
     except Exception as exc:
         saved.unlink(missing_ok=True)
         docs.delete(record.id)
@@ -106,6 +108,7 @@ def enqueue_url(
             settings.ingestion_job_max_attempts,
             tenant_id=principal.tenant_id,
         )
+        INGESTION_JOBS.labels(outcome="enqueued").inc()
     except Exception as exc:
         docs.delete(record.id)
         raise HTTPException(503, f"Unable to queue ingestion: {exc}") from exc
@@ -154,6 +157,7 @@ def cancel_ingestion_job(
         raise HTTPException(404, "Ingestion job not found")
     if not queue.cancel(job_id, principal.tenant_id):
         raise HTTPException(409, "Only queued ingestion jobs can be cancelled")
+    INGESTION_JOBS.labels(outcome="cancelled").inc()
 
     docs = document_store(settings)
     record = docs.get(job.document_id)
