@@ -22,18 +22,20 @@ async def _heartbeat(queue, job_id: str, worker_id: str, lease_seconds: int) -> 
 
 
 async def _run_job(queue, job, worker_id: str, settings) -> None:
+    processing = asyncio.create_task(process_ingestion_job(job, settings))
     heartbeat = asyncio.create_task(
         _heartbeat(queue, job.id, worker_id, settings.worker_lease_seconds)
     )
     try:
-        processing = asyncio.create_task(process_ingestion_job(job, settings))
         done, _pending = await asyncio.wait(
             {processing, heartbeat},
-            return_when=asyncio.FIRST_EXCEPTION,
+            return_when=asyncio.FIRST_COMPLETED,
         )
         if heartbeat in done:
             heartbeat.result()
-        result = await processing
+            raise RuntimeError("Ingestion heartbeat stopped unexpectedly")
+
+        result = processing.result()
         if not queue.complete(job.id, worker_id):
             raise RuntimeError("Ingestion job completion rejected after lease loss")
         logger.info(
@@ -43,6 +45,10 @@ async def _run_job(queue, job, worker_id: str, settings) -> None:
             result.chunk_count,
         )
     except Exception as exc:
+        if not processing.done():
+            processing.cancel()
+            with suppress(asyncio.CancelledError):
+                await processing
         with suppress(Exception):
             queue.fail(job.id, worker_id, str(exc))
             current = queue.get(job.id)
