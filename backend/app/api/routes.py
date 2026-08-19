@@ -1,9 +1,8 @@
 import json
-import mimetypes
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.core.config import Settings, get_settings
@@ -50,20 +49,34 @@ async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
         db = "ok"
     except Exception:
         db = "error"
-    return HealthResponse(status="ok" if qdrant_ok and db == "ok" else "degraded",
-                          qdrant="ok" if qdrant_ok else "error", metadata_store=db)
+    return HealthResponse(
+        status="ok" if qdrant_ok and db == "ok" else "degraded",
+        qdrant="ok" if qdrant_ok else "error",
+        metadata_store=db,
+    )
 
 
 @secure.post("/ingest", response_model=IngestResponse)
-async def ingest_file(file: UploadFile = File(...), settings: Settings = Depends(get_settings)) -> IngestResponse:
+async def ingest_file(
+    file: UploadFile = File(...),
+    settings: Settings = Depends(get_settings),
+) -> IngestResponse:
     data = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
     if len(data) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, "File exceeds upload limit")
     filename = Path(file.filename or "upload").name
     doc_id = str(uuid4())
     now = DocumentStore.now()
-    record = DocumentRecord(id=doc_id, name=filename, source_type="file", content_type=file.content_type,
-                            status="processing", size_bytes=len(data), created_at=now, updated_at=now)
+    record = DocumentRecord(
+        id=doc_id,
+        name=filename,
+        source_type="file",
+        content_type=file.content_type,
+        status="processing",
+        size_bytes=len(data),
+        created_at=now,
+        updated_at=now,
+    )
     store(settings).upsert(record)
     try:
         text = parse_bytes(filename, data)
@@ -79,12 +92,22 @@ async def ingest_file(file: UploadFile = File(...), settings: Settings = Depends
 
 
 @secure.post("/ingest/url", response_model=IngestResponse)
-async def ingest_url(body: UrlIngestRequest, settings: Settings = Depends(get_settings)) -> IngestResponse:
+async def ingest_url(
+    body: UrlIngestRequest,
+    settings: Settings = Depends(get_settings),
+) -> IngestResponse:
     url = str(body.url)
     doc_id = str(uuid4())
     now = DocumentStore.now()
-    record = DocumentRecord(id=doc_id, name=url, source_type="url", source_uri=url,
-                            status="processing", created_at=now, updated_at=now)
+    record = DocumentRecord(
+        id=doc_id,
+        name=url,
+        source_type="url",
+        source_uri=url,
+        status="processing",
+        created_at=now,
+        updated_at=now,
+    )
     store(settings).upsert(record)
     try:
         text, content_type = await fetch_url_text(url, settings)
@@ -99,7 +122,10 @@ async def ingest_url(body: UrlIngestRequest, settings: Settings = Depends(get_se
 
 
 @secure.post("/ingest/preview", response_model=PreviewResponse)
-async def preview(file: UploadFile = File(...), settings: Settings = Depends(get_settings)) -> PreviewResponse:
+async def preview(
+    file: UploadFile = File(...),
+    settings: Settings = Depends(get_settings),
+) -> PreviewResponse:
     data = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
     if len(data) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, "File exceeds upload limit")
@@ -107,9 +133,13 @@ async def preview(file: UploadFile = File(...), settings: Settings = Depends(get
         chunks = split_text(parse_bytes(Path(file.filename or "upload").name, data), settings)
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
-    return PreviewResponse(total_chunks=len(chunks), chunks=[
-        ChunkPreview(index=i, text=chunk, characters=len(chunk)) for i, chunk in enumerate(chunks[:20])
-    ])
+    return PreviewResponse(
+        total_chunks=len(chunks),
+        chunks=[
+            ChunkPreview(index=i, text=chunk, characters=len(chunk))
+            for i, chunk in enumerate(chunks[:20])
+        ],
+    )
 
 
 @secure.get("/documents", response_model=list[DocumentRecord])
@@ -118,7 +148,10 @@ def list_documents(settings: Settings = Depends(get_settings)) -> list[DocumentR
 
 
 @secure.delete("/documents/{doc_id}", status_code=204)
-async def delete_document(doc_id: str, settings: Settings = Depends(get_settings)) -> None:
+async def delete_document(
+    doc_id: str,
+    settings: Settings = Depends(get_settings),
+) -> None:
     record = store(settings).get(doc_id)
     if not record:
         raise HTTPException(404, "Document not found")
@@ -129,7 +162,10 @@ async def delete_document(doc_id: str, settings: Settings = Depends(get_settings
 
 
 @secure.post("/documents/{doc_id}/reindex", response_model=IngestResponse)
-async def reindex_document(doc_id: str, settings: Settings = Depends(get_settings)) -> IngestResponse:
+async def reindex_document(
+    doc_id: str,
+    settings: Settings = Depends(get_settings),
+) -> IngestResponse:
     record = store(settings).get(doc_id)
     if not record:
         raise HTTPException(404, "Document not found")
@@ -152,13 +188,19 @@ async def reindex_document(doc_id: str, settings: Settings = Depends(get_setting
 
 
 @secure.post("/search", response_model=SearchResponse)
-async def search(body: SearchRequest, settings: Settings = Depends(get_settings)) -> SearchResponse:
+async def search(
+    body: SearchRequest,
+    settings: Settings = Depends(get_settings),
+) -> SearchResponse:
     results = await RAGService(settings).search(body.query, body.top_k, body.filters)
     return SearchResponse(results=results)
 
 
 @secure.post("/query", response_model=QueryResponse)
-async def query(body: QueryRequest, settings: Settings = Depends(get_settings)):
+async def query(
+    body: QueryRequest,
+    settings: Settings = Depends(get_settings),
+):
     rag = RAGService(settings)
     if not body.stream:
         return await rag.answer(body.question, body.top_k, body.filters)
@@ -171,7 +213,11 @@ async def query(body: QueryRequest, settings: Settings = Depends(get_settings)):
             yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
         yield "event: done\ndata: {}\n\n"
 
-    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 router.include_router(secure)
