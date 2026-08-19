@@ -20,7 +20,7 @@ function passwordHash(password: string): string {
 }
 
 const password = "correct horse battery staple";
-process.env.ZKB_ADMIN_SESSION_SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef";
+process.env.ZKB_ADMIN_SESSION_SECRET = randomBytes(32).toString("hex");
 process.env.ZKB_ADMIN_USERS_JSON = JSON.stringify([
   { username: "admin", role: "admin", password_hash: passwordHash(password) },
   { username: "reader", role: "viewer", password_hash: passwordHash(password) },
