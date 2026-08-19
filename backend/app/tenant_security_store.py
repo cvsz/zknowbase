@@ -71,6 +71,9 @@ class TenantSecurityStore:
                     )
                     """
                 )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_service_key_tenants_tenant ON service_key_tenants(tenant_id)"
+                )
             return
         assert self.sqlite_path is not None
         with sqlite3.connect(self.sqlite_path, timeout=5.0) as conn:
@@ -81,6 +84,9 @@ class TenantSecurityStore:
                   tenant_id TEXT NOT NULL
                 )
                 """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_service_key_tenants_tenant ON service_key_tenants(tenant_id)"
             )
             conn.commit()
 
@@ -137,6 +143,11 @@ class TenantSecurityStore:
         record.tenant_id = self._tenant_for(record.id)
         return record
 
+    def _backfill_legacy_key_tenants(self) -> None:
+        """Map pre-tenant service keys to the configured migration tenant."""
+        for record in self.base.list_keys():
+            self._tenant_for(record.id)
+
     def create_key(
         self,
         name: str,
@@ -191,8 +202,50 @@ class TenantSecurityStore:
     ) -> AuditRecord:
         return self.base.audit(principal_id, key_prefix, action, resource, outcome, detail)
 
-    def list_audit(self, limit: int = 100) -> list[AuditRecord]:
-        return self.base.list_audit(limit)
+    def list_audit(self, limit: int = 100, *, tenant_id: str | None = None) -> list[AuditRecord]:
+        """Return audit events, optionally constrained to one authoritative tenant.
+
+        Tenant-scoped reads join audit principals to durable service-key ownership.
+        Anonymous/unknown-key authentication failures are deliberately excluded from
+        tenant views because they have no trustworthy tenant identity. Legacy service
+        keys are first mapped to the configured default tenant for deterministic
+        migration. The unscoped mode is retained only for internal compatibility and
+        must not be exposed by tenant-facing APIs.
+        """
+        if tenant_id is None:
+            return self.base.list_audit(limit)
+        self._backfill_legacy_key_tenants()
+        if self.postgres_pool is not None:
+            with self.postgres_pool.connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT a.*
+                    FROM security_audit AS a
+                    LEFT JOIN service_key_tenants AS t ON t.key_id = a.principal_id
+                    WHERE t.tenant_id = %s
+                       OR (a.principal_id = 'bootstrap' AND %s = %s)
+                    ORDER BY a.created_at DESC
+                    LIMIT %s
+                    """,
+                    (tenant_id, tenant_id, self.default_tenant_id, limit),
+                ).fetchall()
+            return [AuditRecord(**row) for row in rows]
+        assert self.sqlite_path is not None
+        with sqlite3.connect(self.sqlite_path, timeout=5.0) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT a.*
+                FROM security_audit AS a
+                LEFT JOIN service_key_tenants AS t ON t.key_id = a.principal_id
+                WHERE t.tenant_id = ?
+                   OR (a.principal_id = 'bootstrap' AND ? = ?)
+                ORDER BY a.created_at DESC
+                LIMIT ?
+                """,
+                (tenant_id, tenant_id, self.default_tenant_id, limit),
+            ).fetchall()
+        return [AuditRecord(**dict(row)) for row in rows]
 
     def token_prefix(self, raw_key: str) -> str | None:
         return self.base.token_prefix(raw_key)
