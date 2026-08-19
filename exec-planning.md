@@ -26,6 +26,8 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 10. Durable local work: ingestion jobs use the metadata DB for leases/retries instead of a paid/external queue.
 11. Parse only after upload security validation; local ClamAV mode fails closed when selected.
 12. Human Admin sessions and backend service credentials are separate trust boundaries.
+13. Tenant identity is derived from the authenticated principal and enforced server-side; client filters never define authorization.
+14. The shared Qdrant collection is tenant-partitioned by mandatory payload filters on every supported vector operation rather than by dynamically created per-tenant collections.
 
 ## Delivery slices
 
@@ -131,6 +133,7 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] owner-only backup archive permissions
 - [x] pre-restore safety backup by default
 - [x] operator runbook with verification, isolated restore drill, RPO/RTO evidence checklist
+- [x] tenant key/job/audit ownership preserved by current Postgres backups, with deterministic legacy-v1 fallback
 
 ### S13 — Optional self-hosted OIDC login
 - [x] local username/password auth remains the default and requires no IdP
@@ -142,6 +145,18 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] OIDC sessions reuse the existing signed HttpOnly Admin session boundary
 - [x] OIDC configuration/role/state regression tests run with the existing frontend auth gate
 
+### S14 — Tenant isolation and encryption policy
+- [x] durable tenant identity on service keys and authenticated principals
+- [x] tenant ownership on SQLite/Postgres document metadata
+- [x] tenant-bound synchronous ingest/query/search/list/delete/reindex lifecycle
+- [x] shared Qdrant collection with mandatory tenant payload on upsert/search/delete and citation validation
+- [x] tenant ownership on durable async ingestion jobs, queue reads/cancel, worker reconciliation, and Postgres/SQLite queue mappings
+- [x] tenant-scoped service-key administration
+- [x] tenant-scoped security-audit reads with immutable audit→tenant ownership for new events and deterministic legacy fallback
+- [x] cross-tenant negative regression coverage across metadata, vector, async queue, and audit boundaries
+- [x] backup/restore preserves key/job/audit tenant sidecars on current Postgres archives
+- [x] explicit self-hosted encryption policy defines secrets, data-at-rest, transport, backups, key ownership/rotation, and non-claims without inventing custom cryptography
+
 ## Production hardening backlog
 - [x] Replace single API key with scoped service keys + rotation/audit table.
 - [x] Optional local Postgres metadata backend for HA/multi-replica deployments.
@@ -150,7 +165,7 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] Local Admin UI human authentication + viewer/admin RBAC without mandatory SaaS identity.
 - [x] Optional OIDC login adapter for self-hosted identity providers.
 - [x] Hybrid BM25+dense retrieval + local reranker.
-- [ ] Per-tenant collections and encryption policy.
+- [x] Tenant-isolated shared Qdrant storage and explicit encryption policy (chosen over per-tenant collections after enforcing authenticated-principal tenant payload boundaries).
 - [ ] OpenTelemetry traces/metrics and local SLO dashboards.
 - [x] Backup/restore runbook for SQLite/Postgres and Qdrant snapshots.
 - [ ] zworkforce native module wiring after consumer-side interface review.
@@ -171,6 +186,10 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - Missing/invalid/revoked/expired service keys fail closed.
 - Read-only service keys cannot mutate documents.
 - Service-key plaintext is never persisted and rotation revokes the old key atomically.
-- Query citations contain document/chunk identity.
-- Delete removes both metadata and vectors.
+- Tenant principals cannot list/read/delete/reindex/search/vector-access another tenant's resources or audit stream.
+- Async ingestion jobs cannot be listed/cancelled/reconciled across tenants.
+- Query citations contain document/chunk/tenant identity and cannot cross the authenticated tenant boundary.
+- Delete removes both metadata and vectors within the authenticated tenant boundary.
+- Current Postgres backups preserve service-key, ingestion-job, and immutable audit tenant ownership.
+- Encryption documentation makes no application-layer confidentiality claim beyond implemented primitives and requires encrypted storage/transport where the threat model demands it.
 - Default runtime requires no paid API, managed service, hosted identity, or external queue.
