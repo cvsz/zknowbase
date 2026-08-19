@@ -47,6 +47,7 @@ services:
     environment:
       ZKB_ENVIRONMENT: production
       ZKB_API_KEY: ${ZKB_API_KEY:?Set ZKB_API_KEY in .env}
+      ZKB_BOOTSTRAP_API_KEY_ENABLED: ${ZKB_BOOTSTRAP_API_KEY_ENABLED:-true}
       ZKB_FRONTEND_ORIGIN: http://localhost:3000
       ZKB_QDRANT_URL: http://qdrant:6333
       ZKB_METADATA_DB: /data/zknowbase.db
@@ -72,7 +73,7 @@ services:
       - backend
     environment:
       ZKB_BACKEND_URL: http://backend:8000
-      ZKB_API_KEY: ${ZKB_API_KEY:?Set ZKB_API_KEY in .env}
+      ZKB_API_KEY: ${ZKB_FRONTEND_API_KEY:?Set ZKB_FRONTEND_API_KEY in .env}
     ports:
       - "3000:3000"
 

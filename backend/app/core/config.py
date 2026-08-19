@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     app_name: str = "zknowbase"
     environment: str = "development"
     api_key: str = Field(default="change-me-long-random-secret", min_length=16)
+    bootstrap_api_key_enabled: bool = True
     frontend_origin: str = "http://localhost:3000"
 
     qdrant_url: str = "http://localhost:6333"
@@ -38,7 +39,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_secret(self) -> "Settings":
-        if self.environment.lower() == "production" and self.api_key == "change-me-long-random-secret":
+        if (
+            self.environment.lower() == "production"
+            and self.bootstrap_api_key_enabled
+            and self.api_key == "change-me-long-random-secret"
+        ):
             raise ValueError("ZKB_API_KEY must be replaced before production startup")
         return self
 

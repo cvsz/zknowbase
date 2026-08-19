@@ -2,28 +2,46 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.core.config import Settings, get_settings
-from app.core.security import require_api_key
+from app.core.security import Principal, require_scopes
 from app.models.schemas import (
-    ChunkPreview, DocumentRecord, HealthResponse, IngestResponse, PreviewResponse,
-    QueryRequest, QueryResponse, SearchRequest, SearchResponse, UrlIngestRequest,
+    AuditRecord,
+    ChunkPreview,
+    DocumentRecord,
+    HealthResponse,
+    IngestResponse,
+    PreviewResponse,
+    QueryRequest,
+    QueryResponse,
+    SearchRequest,
+    SearchResponse,
+    ServiceKeyCreateRequest,
+    ServiceKeyCreateResponse,
+    ServiceKeyRecord,
+    UrlIngestRequest,
 )
 from app.rag.chunking import split_text
 from app.rag.loaders import fetch_url_text, parse_bytes
 from app.rag.providers import AIProviders
 from app.rag.service import RAGService
 from app.rag.vector_store import VectorStore
+from app.security_store import SecurityStore
 from app.store import DocumentStore
 
 router = APIRouter()
-secure = APIRouter(dependencies=[Depends(require_api_key)])
+read_secure = APIRouter(dependencies=[Depends(require_scopes("knowledge:read"))])
+write_secure = APIRouter(dependencies=[Depends(require_scopes("knowledge:write"))])
 
 
 def store(settings: Settings) -> DocumentStore:
     return DocumentStore(settings.metadata_db)
+
+
+def security_store(settings: Settings) -> SecurityStore:
+    return SecurityStore(settings.metadata_db)
 
 
 async def _index(record: DocumentRecord, text: str, settings: Settings) -> DocumentRecord:
@@ -46,6 +64,7 @@ async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
     qdrant_ok = await VectorStore(settings).healthy()
     try:
         store(settings).list()
+        security_store(settings).list_keys()
         db = "ok"
     except Exception:
         db = "error"
@@ -56,7 +75,7 @@ async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
     )
 
 
-@secure.post("/ingest", response_model=IngestResponse)
+@write_secure.post("/ingest", response_model=IngestResponse)
 async def ingest_file(
     file: UploadFile = File(...),
     settings: Settings = Depends(get_settings),
@@ -91,7 +110,7 @@ async def ingest_file(
     return IngestResponse(document=record)
 
 
-@secure.post("/ingest/url", response_model=IngestResponse)
+@write_secure.post("/ingest/url", response_model=IngestResponse)
 async def ingest_url(
     body: UrlIngestRequest,
     settings: Settings = Depends(get_settings),
@@ -121,7 +140,7 @@ async def ingest_url(
     return IngestResponse(document=record)
 
 
-@secure.post("/ingest/preview", response_model=PreviewResponse)
+@write_secure.post("/ingest/preview", response_model=PreviewResponse)
 async def preview(
     file: UploadFile = File(...),
     settings: Settings = Depends(get_settings),
@@ -142,12 +161,12 @@ async def preview(
     )
 
 
-@secure.get("/documents", response_model=list[DocumentRecord])
+@read_secure.get("/documents", response_model=list[DocumentRecord])
 def list_documents(settings: Settings = Depends(get_settings)) -> list[DocumentRecord]:
     return store(settings).list()
 
 
-@secure.delete("/documents/{doc_id}", status_code=204)
+@write_secure.delete("/documents/{doc_id}", status_code=204)
 async def delete_document(
     doc_id: str,
     settings: Settings = Depends(get_settings),
@@ -161,7 +180,7 @@ async def delete_document(
     store(settings).delete(doc_id)
 
 
-@secure.post("/documents/{doc_id}/reindex", response_model=IngestResponse)
+@write_secure.post("/documents/{doc_id}/reindex", response_model=IngestResponse)
 async def reindex_document(
     doc_id: str,
     settings: Settings = Depends(get_settings),
@@ -187,7 +206,7 @@ async def reindex_document(
     return IngestResponse(document=record)
 
 
-@secure.post("/search", response_model=SearchResponse)
+@read_secure.post("/search", response_model=SearchResponse)
 async def search(
     body: SearchRequest,
     settings: Settings = Depends(get_settings),
@@ -196,7 +215,7 @@ async def search(
     return SearchResponse(results=results)
 
 
-@secure.post("/query", response_model=QueryResponse)
+@read_secure.post("/query", response_model=QueryResponse)
 async def query(
     body: QueryRequest,
     settings: Settings = Depends(get_settings),
@@ -220,4 +239,82 @@ async def query(
     )
 
 
-router.include_router(secure)
+@router.post("/service-keys", response_model=ServiceKeyCreateResponse, status_code=201)
+def create_service_key(
+    body: ServiceKeyCreateRequest,
+    request: Request,
+    principal: Principal = Depends(require_scopes("keys:admin")),
+    settings: Settings = Depends(get_settings),
+) -> ServiceKeyCreateResponse:
+    sec = security_store(settings)
+    record, raw_key = sec.create_key(body.name, list(body.scopes), body.expires_at)
+    sec.audit(
+        principal.id,
+        principal.key_prefix,
+        "service_key.create",
+        record.id,
+        "success",
+        f"name={record.name};scopes={','.join(record.scopes)}",
+    )
+    return ServiceKeyCreateResponse(key=record, secret=raw_key)
+
+
+@router.get("/service-keys", response_model=list[ServiceKeyRecord])
+def list_service_keys(
+    _principal: Principal = Depends(require_scopes("keys:admin")),
+    settings: Settings = Depends(get_settings),
+) -> list[ServiceKeyRecord]:
+    return security_store(settings).list_keys()
+
+
+@router.post("/service-keys/{key_id}/rotate", response_model=ServiceKeyCreateResponse)
+def rotate_service_key(
+    key_id: str,
+    principal: Principal = Depends(require_scopes("keys:admin")),
+    settings: Settings = Depends(get_settings),
+) -> ServiceKeyCreateResponse:
+    sec = security_store(settings)
+    rotated = sec.rotate(key_id)
+    if rotated is None:
+        raise HTTPException(404, "Active service key not found")
+    record, raw_key = rotated
+    sec.audit(
+        principal.id,
+        principal.key_prefix,
+        "service_key.rotate",
+        key_id,
+        "success",
+        f"replacement={record.id}",
+    )
+    return ServiceKeyCreateResponse(key=record, secret=raw_key)
+
+
+@router.delete("/service-keys/{key_id}", status_code=204)
+def revoke_service_key(
+    key_id: str,
+    principal: Principal = Depends(require_scopes("keys:admin")),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    sec = security_store(settings)
+    if not sec.revoke(key_id):
+        raise HTTPException(404, "Service key not found")
+    sec.audit(
+        principal.id,
+        principal.key_prefix,
+        "service_key.revoke",
+        key_id,
+        "success",
+    )
+
+
+@router.get("/audit", response_model=list[AuditRecord])
+def list_security_audit(
+    limit: int = Query(default=100, ge=1, le=500),
+    _principal: Principal = Depends(require_scopes("audit:read")),
+    settings: Settings = Depends(get_settings),
+) -> list[AuditRecord]:
+    return security_store(settings).list_audit(limit)
+
+
+router.include_router(read_secure)
+router.include_router(write_secure)

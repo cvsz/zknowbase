@@ -51,7 +51,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      ZKB_API_KEY: ci-only-test-secret-not-for-production
+      ZKB_API_KEY: ci-only-bootstrap-secret-not-for-production
+      ZKB_FRONTEND_API_KEY: ci-only-frontend-secret-not-for-production
     steps:
       - uses: actions/checkout@v7
       - run: docker compose config --quiet
