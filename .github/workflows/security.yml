@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           report=/tmp/gitleaks.json
-          /tmp/gitleaks git --redact --no-banner --exit-code 0 \
+          /tmp/gitleaks git --config .gitleaks.toml --redact --no-banner --exit-code 0 \
             --report-format json --report-path "$report" .
           python - <<'PY'
           import json
