@@ -143,7 +143,6 @@ def _restore_postgres(settings: Settings, source_path: Path) -> None:
     if payload.get("format_version") != 1 or not isinstance(payload.get("tables"), dict):
         raise BackupError("Unsupported Postgres metadata backup format")
 
-    # Ensure current schemas exist before the destructive transaction.
     document_store(settings)
     security_store(settings)
     ingestion_queue(settings)
@@ -335,6 +334,7 @@ async def create_backup(settings: Settings, output: Path | None = None, *, lock:
             with tarfile.open(output, "w:gz") as tar:
                 for path in sorted(workdir.iterdir()):
                     tar.add(path, arcname=path.name, recursive=False)
+            os.chmod(output, 0o600)
     finally:
         if lock:
             lock_context.__exit__(None, None, None)
