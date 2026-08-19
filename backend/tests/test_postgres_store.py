@@ -5,15 +5,29 @@ from uuid import uuid4
 import pytest
 
 from app.models.schemas import DocumentRecord
-from app.postgres_store import PostgresDocumentStore, PostgresSecurityStore
+from app.postgres_store import (
+    PostgresDocumentStore,
+    PostgresSecurityStore,
+    create_postgres_pool,
+)
 
 POSTGRES_URL = os.getenv("ZKB_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not POSTGRES_URL, reason="local Postgres test DSN not configured")
 
 
+def test_postgres_document_and_security_stores_share_pool():
+    assert POSTGRES_URL is not None
+    pool = create_postgres_pool(POSTGRES_URL, min_size=1, max_size=2)
+    docs = PostgresDocumentStore(pool)
+    security = PostgresSecurityStore(pool)
+    assert docs.pool is security.pool
+    pool.close()
+
+
 def test_postgres_document_crud():
     assert POSTGRES_URL is not None
-    store = PostgresDocumentStore(POSTGRES_URL, min_size=1, max_size=2)
+    pool = create_postgres_pool(POSTGRES_URL, min_size=1, max_size=2)
+    store = PostgresDocumentStore(pool)
     doc_id = str(uuid4())
     now = store.now()
     record = DocumentRecord(
@@ -38,12 +52,13 @@ def test_postgres_document_crud():
         assert store.delete(doc_id) is True
         assert store.get(doc_id) is None
     finally:
-        store.pool.close()
+        pool.close()
 
 
 def test_postgres_key_rotation_and_audit():
     assert POSTGRES_URL is not None
-    store = PostgresSecurityStore(POSTGRES_URL, min_size=1, max_size=2)
+    pool = create_postgres_pool(POSTGRES_URL, min_size=1, max_size=2)
+    store = PostgresSecurityStore(pool)
     try:
         old, old_token = store.create_key(
             f"zworkforce-{uuid4().hex[:8]}",
@@ -68,4 +83,4 @@ def test_postgres_key_rotation_and_audit():
         assert store.revoke(replacement.id) is True
         assert store.verify(replacement_token) is None
     finally:
-        store.pool.close()
+        pool.close()
