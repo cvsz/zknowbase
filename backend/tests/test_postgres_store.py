@@ -11,6 +11,7 @@ from app.postgres_store import (
     create_postgres_pool,
 )
 from app.queue_store import PostgresIngestionQueue
+from app.tenant_security_store import TenantSecurityStore
 
 POSTGRES_URL = os.getenv("ZKB_TEST_POSTGRES_URL")
 pytestmark = pytest.mark.skipif(not POSTGRES_URL, reason="local Postgres test DSN not configured")
@@ -84,6 +85,52 @@ def test_postgres_key_rotation_and_audit():
         assert any(item.id == event.id for item in store.list_audit(100))
         assert store.revoke(replacement.id) is True
         assert store.verify(replacement_token) is None
+    finally:
+        pool.close()
+
+
+def test_postgres_tenant_audit_isolation():
+    assert POSTGRES_URL is not None
+    pool = create_postgres_pool(POSTGRES_URL, min_size=1, max_size=2)
+    store = TenantSecurityStore(
+        PostgresSecurityStore(pool),
+        default_tenant_id="default",
+        postgres_pool=pool,
+    )
+    suffix = uuid4().hex[:8]
+    try:
+        tenant_a, _ = store.create_key(
+            f"tenant-a-{suffix}",
+            ["audit:read"],
+            tenant_id=f"tenant-a-{suffix}",
+        )
+        tenant_b, _ = store.create_key(
+            f"tenant-b-{suffix}",
+            ["audit:read"],
+            tenant_id=f"tenant-b-{suffix}",
+        )
+        event_a = store.audit(
+            tenant_a.id,
+            tenant_a.key_prefix,
+            "integration.audit",
+            "a",
+            "success",
+            tenant_id=tenant_a.tenant_id,
+        )
+        event_b = store.audit(
+            tenant_b.id,
+            tenant_b.key_prefix,
+            "integration.audit",
+            "b",
+            "success",
+            tenant_id=tenant_b.tenant_id,
+        )
+        a_ids = {event.id for event in store.list_audit(100, tenant_id=tenant_a.tenant_id)}
+        b_ids = {event.id for event in store.list_audit(100, tenant_id=tenant_b.tenant_id)}
+        assert event_a.id in a_ids
+        assert event_b.id not in a_ids
+        assert event_b.id in b_ids
+        assert event_a.id not in b_ids
     finally:
         pool.close()
 
