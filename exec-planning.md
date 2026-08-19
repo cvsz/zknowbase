@@ -5,10 +5,11 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 
 ## Hard constraints
 1. Default runtime must work fully offline after model images/artifacts are present.
-2. Default stack must not require paid SaaS, managed databases, or paid model APIs.
+2. Default stack must not require paid SaaS, managed databases, paid queues, or paid model APIs.
 3. Ollama, Qdrant, SQLite, local files, Docker/Compose are the baseline path.
 4. Cloud model providers remain optional adapters only and are never required for core functionality.
 5. Optional Postgres must run locally/self-hosted; SQLite remains the default for a single-node deployment.
+6. Background ingestion must not require Redis, Celery, or an external broker.
 
 ## Architecture principles
 1. API-first boundary: zworkforce never reaches the vector DB directly.
@@ -20,6 +21,7 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 7. Local-first inference: Qdrant + Ollama run in Docker; OpenAI, Anthropic, and Gemini are opt-in only.
 8. Idempotent lifecycle: deleting/reindexing a document also reconciles vectors.
 9. Least privilege: generated service keys are scoped, revocable/rotatable, and never persisted in plaintext.
+10. Durable local work: ingestion jobs use the metadata DB for leases/retries instead of a paid/external queue.
 
 ## Delivery slices
 
@@ -77,10 +79,20 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] optional Docker Compose `ha` profile for local Postgres
 - [x] CI integration test against real Postgres service
 
+### S8 — Durable local asynchronous ingestion
+- [x] DB-backed queue; no Redis/Celery/external broker required
+- [x] SQLite queue with WAL/busy-timeout for backend+worker concurrency
+- [x] Postgres queue with `FOR UPDATE SKIP LOCKED` multi-worker claims
+- [x] worker ownership, leases, heartbeat renewal, retry budget, cancellation
+- [x] local worker container sharing uploaded-file volume
+- [x] async file and URL enqueue APIs
+- [x] job list/status/cancel APIs
+- [x] worker and queue unit/integration coverage
+
 ## Production hardening backlog
 - [x] Replace single API key with scoped service keys + rotation/audit table.
 - [x] Optional local Postgres metadata backend for HA/multi-replica deployments.
-- [ ] Queue-backed asynchronous ingestion for very large corpora using a local broker/runtime.
+- [x] Queue-backed asynchronous ingestion for large corpora without an external broker.
 - [ ] Malware scanning / CDR before parsing untrusted uploads using self-hosted tools.
 - [ ] Local/OIDC-compatible RBAC for Admin UI without mandatory SaaS identity dependency.
 - [ ] Hybrid BM25+dense retrieval + local reranker.
@@ -94,11 +106,12 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - Python syntax/import validation green.
 - Frontend `npm run build` green.
 - Docker Compose default and optional `ha` profile validate.
-- Postgres integration test runs against an actual local Postgres service in CI.
+- Postgres integration tests run against an actual local Postgres service in CI.
+- Durable queue tests prove FIFO claim, worker ownership, retries, cancel, and completion.
 - No secrets committed.
 - Missing/invalid/revoked/expired keys fail closed.
 - Read-only service keys cannot mutate documents.
 - Service-key plaintext is never persisted and rotation revokes the old key atomically.
 - Query citations contain document/chunk identity.
 - Delete removes both metadata and vectors.
-- Default runtime requires no paid API or managed service.
+- Default runtime requires no paid API, managed service, or external queue.
