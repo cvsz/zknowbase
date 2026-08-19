@@ -27,7 +27,7 @@ async def test_run_job_finishes_before_heartbeat(monkeypatch):
 
     monkeypatch.setattr(worker, "process_ingestion_job", fake_process)
     queue = FakeQueue()
-    job = SimpleNamespace(id="job-1", document_id="doc-1")
+    job = SimpleNamespace(id="job-1", document_id="doc-1", tenant_id="default")
     settings = SimpleNamespace(worker_lease_seconds=30)
 
     await worker._run_job(queue, job, "worker-a", settings)
@@ -54,7 +54,7 @@ async def test_stale_worker_does_not_mutate_document_after_lease_loss(monkeypatc
 
     monkeypatch.setattr(worker, "process_ingestion_job", failing_process)
     monkeypatch.setattr(worker, "document_store", forbidden_document_store)
-    job = SimpleNamespace(id="job-stale", document_id="doc-stale")
+    job = SimpleNamespace(id="job-stale", document_id="doc-stale", tenant_id="default")
     settings = SimpleNamespace(worker_lease_seconds=30)
 
     await worker._run_job(StaleQueue(), job, "worker-old", settings)
