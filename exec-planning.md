@@ -12,6 +12,7 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 6. Safe ingestion: bounded uploads, explicit content types, SSRF-resistant URL ingestion, bounded response size.
 7. Local-first: Qdrant + Ollama run in Docker; OpenAI-compatible, Anthropic, and Gemini LLM adapters are configurable.
 8. Idempotent lifecycle: deleting/reindexing a document also reconciles vectors.
+9. Least privilege: generated service keys are scoped, revocable/rotatable, and never persisted in plaintext.
 
 ## Delivery slices
 
@@ -50,8 +51,17 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] backend unit tests
 - [x] CI lint/test/build workflow
 
+### S6 — Scoped service authentication
+- [x] generated service keys stored as hashes only
+- [x] scopes: `knowledge:read`, `knowledge:write`, `keys:admin`, `audit:read`
+- [x] expiry, revocation, last-used tracking, and atomic rotation
+- [x] service-key lifecycle API
+- [x] durable authentication/authorization audit table
+- [x] bootstrap/root key can be disabled after provisioning
+- [x] separate server-side Admin UI credential
+
 ## Production hardening backlog
-- [ ] Replace single API key with scoped service keys + rotation/audit table.
+- [x] Replace single API key with scoped service keys + rotation/audit table.
 - [ ] Postgres metadata backend for HA/multi-replica deployments.
 - [ ] Queue-backed asynchronous ingestion for very large corpora.
 - [ ] Malware scanning / CDR before parsing untrusted uploads.
@@ -68,6 +78,8 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - Frontend `npm run build` green.
 - Docker Compose config validates.
 - No secrets committed.
-- API auth rejects missing/invalid keys.
+- Missing/invalid/revoked/expired keys fail closed.
+- Read-only service keys cannot mutate documents.
+- Service-key plaintext is never persisted and rotation revokes the old key atomically.
 - Query citations contain document/chunk identity.
 - Delete removes both metadata and vectors.
