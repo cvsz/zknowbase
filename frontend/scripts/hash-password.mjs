@@ -16,4 +16,6 @@ const salt = randomBytes(16);
 const digest = scryptSync(password, salt, 64, { N, r, p, maxmem: 128 * 1024 * 1024 });
 const password_hash = `scrypt$v1$${N}$${r}$${p}$${salt.toString("base64url")}$${digest.toString("base64url")}`;
 const users = JSON.stringify([{ username, role, password_hash }]);
-console.log(`ZKB_ADMIN_USERS_JSON=${users}`);
+// Compose treats single-quoted .env values literally, preserving the `$` separators
+// inside scrypt hashes rather than interpreting them as variable interpolation.
+console.log(`ZKB_ADMIN_USERS_JSON='${users}'`);
