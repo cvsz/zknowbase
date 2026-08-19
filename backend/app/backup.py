@@ -22,12 +22,17 @@ from app.maintenance import mutation_lock
 from app.store_factory import document_store, ingestion_queue, security_store
 
 FORMAT_VERSION = 1
-POSTGRES_TABLES = (
+POSTGRES_REQUIRED_TABLES = (
     "documents",
     "service_keys",
     "security_audit",
     "ingestion_jobs",
 )
+POSTGRES_TENANT_MAPPING_TABLES = (
+    "service_key_tenants",
+    "ingestion_job_tenants",
+)
+POSTGRES_TABLES = POSTGRES_REQUIRED_TABLES + POSTGRES_TENANT_MAPPING_TABLES
 
 
 class BackupError(RuntimeError):
@@ -143,15 +148,24 @@ def _restore_postgres(settings: Settings, source_path: Path) -> None:
     if payload.get("format_version") != 1 or not isinstance(payload.get("tables"), dict):
         raise BackupError("Unsupported Postgres metadata backup format")
 
+    tables = payload["tables"]
     document_store(settings)
     security_store(settings)
     ingestion_queue(settings)
 
     with psycopg.connect(settings.postgres_url, row_factory=dict_row) as conn:
         with conn.transaction():
-            conn.execute("TRUNCATE ingestion_jobs, security_audit, service_keys, documents")
+            conn.execute(
+                "TRUNCATE ingestion_job_tenants, service_key_tenants, "
+                "ingestion_jobs, security_audit, service_keys, documents"
+            )
             for table in POSTGRES_TABLES:
-                rows = payload["tables"].get(table)
+                rows = tables.get(table)
+                if rows is None and table in POSTGRES_TENANT_MAPPING_TABLES:
+                    # Backward compatibility for pre-tenant FORMAT_VERSION=1 archives.
+                    # Tenant wrappers deterministically remap restored legacy keys/jobs
+                    # to ZKB_DEFAULT_TENANT_ID when they are first observed.
+                    continue
                 if not isinstance(rows, list):
                     raise BackupError(f"Missing Postgres table backup: {table}")
                 for row in rows:
@@ -255,9 +269,18 @@ def _version_minor(version: str) -> tuple[int, int]:
         raise BackupError(f"Invalid Qdrant version: {version}") from exc
 
 
-def _write_manifest(workdir: Path, settings: Settings, qdrant_version: str, qdrant: dict[str, Any] | None) -> dict[str, Any]:
+def _write_manifest(
+    workdir: Path,
+    settings: Settings,
+    qdrant_version: str,
+    qdrant: dict[str, Any] | None,
+) -> dict[str, Any]:
     component_names = ["uploads.tar.gz"]
-    metadata_name = "metadata.sqlite" if settings.metadata_backend == "sqlite" else "metadata.postgres.json"
+    metadata_name = (
+        "metadata.sqlite"
+        if settings.metadata_backend == "sqlite"
+        else "metadata.postgres.json"
+    )
     component_names.append(metadata_name)
     if qdrant is not None:
         component_names.append("qdrant.snapshot")
@@ -276,7 +299,10 @@ def _write_manifest(workdir: Path, settings: Settings, qdrant_version: str, qdra
         },
         "components": components,
     }
-    (workdir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    (workdir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
     return manifest
 
 
@@ -303,7 +329,12 @@ def _verify_workdir(workdir: Path) -> dict[str, Any]:
     return manifest
 
 
-async def create_backup(settings: Settings, output: Path | None = None, *, lock: bool = True) -> Path:
+async def create_backup(
+    settings: Settings,
+    output: Path | None = None,
+    *,
+    lock: bool = True,
+) -> Path:
     settings.ensure_paths()
     if output is None:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -341,7 +372,13 @@ async def create_backup(settings: Settings, output: Path | None = None, *, lock:
     return output
 
 
-async def restore_backup(settings: Settings, archive: Path, *, yes: bool, safety_backup: bool = True) -> Path | None:
+async def restore_backup(
+    settings: Settings,
+    archive: Path,
+    *,
+    yes: bool,
+    safety_backup: bool = True,
+) -> Path | None:
     if not yes:
         raise BackupError("Restore is destructive; pass --yes to continue")
     archive = archive.resolve()
@@ -357,22 +394,32 @@ async def restore_backup(settings: Settings, archive: Path, *, yes: bool, safety
                 "Metadata backend mismatch; restore into the same backend type used by the backup"
             )
         qdrant_manifest = manifest.get("qdrant")
-        if not isinstance(qdrant_manifest, dict) or qdrant_manifest.get("collection") != settings.qdrant_collection:
+        if (
+            not isinstance(qdrant_manifest, dict)
+            or qdrant_manifest.get("collection") != settings.qdrant_collection
+        ):
             raise BackupError("Qdrant collection mismatch")
 
         qdrant_client = QdrantSnapshots(settings)
         current_qdrant_version = await qdrant_client.version()
         backup_qdrant_version = qdrant_manifest.get("version")
-        if not isinstance(backup_qdrant_version, str) or _version_minor(current_qdrant_version) != _version_minor(backup_qdrant_version):
+        if (
+            not isinstance(backup_qdrant_version, str)
+            or _version_minor(current_qdrant_version) != _version_minor(backup_qdrant_version)
+        ):
             raise BackupError(
-                f"Qdrant minor-version mismatch: backup={backup_qdrant_version}, current={current_qdrant_version}"
+                f"Qdrant minor-version mismatch: backup={backup_qdrant_version}, "
+                f"current={current_qdrant_version}"
             )
 
         with mutation_lock(settings.maintenance_lock_path, exclusive=True):
             safety_path = None
             if safety_backup:
                 timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                safety_path = settings.backup_dir / f"pre-restore-{timestamp}-{uuid4().hex[:8]}.tar.gz"
+                safety_path = (
+                    settings.backup_dir
+                    / f"pre-restore-{timestamp}-{uuid4().hex[:8]}.tar.gz"
+                )
                 await create_backup(settings, safety_path, lock=False)
 
             snapshot_info = qdrant_manifest.get("snapshot")
@@ -428,7 +475,14 @@ async def _main_async() -> int:
         yes=args.yes,
         safety_backup=not args.no_safety_backup,
     )
-    print(json.dumps({"restored": str(args.archive.resolve()), "safety_backup": str(safety) if safety else None}))
+    print(
+        json.dumps(
+            {
+                "restored": str(args.archive.resolve()),
+                "safety_backup": str(safety) if safety else None,
+            }
+        )
+    )
     return 0
 
 
