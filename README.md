@@ -11,7 +11,7 @@ Self-hosted, API-first AI Knowledge Base for organizational documents and RAG wo
 - Ollama local embeddings + LLM by default
 - OpenAI/Gemini embeddings and OpenAI/Anthropic/Gemini LLM adapters
 - Grounded answers with source/chunk citations and relevance scores
-- SSE query endpoint
+- SSE query endpoint with native Ollama/OpenAI token streaming
 - Durable SQLite document lifecycle metadata
 - Admin UI: dashboard, ingestion/chunk preview, vector management, RAG playground
 - Server-side Next.js API proxy so the backend API key is **not exposed to browser JavaScript**
@@ -98,6 +98,7 @@ export ZKNOWBASE_API_KEY='...'
 ```
 
 ```python
+import os
 from zknowbase_client import ZKnowbaseClient
 
 kb = ZKnowbaseClient(
@@ -105,10 +106,7 @@ kb = ZKnowbaseClient(
     api_key=os.environ["ZKNOWBASE_API_KEY"],
 )
 
-# retrieval-only tool call
 contexts = kb.search("expense approval workflow", top_k=5)
-
-# grounded generation
 result = kb.ask("How do I get an expense approved?")
 print(result["answer"])
 print(result["sources"])
@@ -126,8 +124,8 @@ The embedding provider is intentionally separate from the LLM provider because A
 
 ## Security notes
 
-- Change the development API key before any deployment.
-- URL ingestion resolves DNS and rejects non-global addresses; redirects are rejected to reduce SSRF/rebinding exposure.
+- Production startup rejects the default development API key.
+- URL ingestion has SSRF guardrails: public HTTP(S) only, DNS resolution rejects non-global addresses, redirects are rejected, and response size is bounded. This is defense-in-depth, not a substitute for an egress proxy/pinned-destination fetcher in high-assurance deployments.
 - Files are basename-normalized and size bounded.
 - Cloud provider keys stay in the backend only.
 - Do not expose Qdrant or Ollama directly to untrusted networks in production; the published ports are for local development.
