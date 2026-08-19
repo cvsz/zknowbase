@@ -94,8 +94,6 @@ export function authenticateLocalUser(username: string, password: string): { use
   if (!USERNAME_RE.test(username) || password.length < 1 || password.length > 4096) return null;
   const users = parseLocalUsers();
   const user = users.find((candidate) => candidate.username.toLowerCase() === username.toLowerCase());
-  // Run scrypt even for an unknown username so the common failure paths have
-  // comparable computational cost and reveal less through response timing.
   const comparisonHash = user?.password_hash ?? users[0].password_hash;
   const valid = verifyScryptPassword(password, comparisonHash);
   if (!user || !valid) return null;
@@ -142,19 +140,15 @@ export function verifyAdminSession(token: string | undefined, nowSeconds = Math.
     value.exp - value.iat > SESSION_TTL_SECONDS
   ) return null;
 
-  // Local config is the current authorization authority. Removing a user or
-  // changing its role revokes an otherwise cryptographically valid session.
+  const subject = value.sub as string;
+  const role = value.role as AdminRole;
+  const issuedAt = value.iat as number;
+  const expiresAt = value.exp as number;
   const configured = parseLocalUsers().find(
-    (user) => user.username.toLowerCase() === value.sub.toLowerCase(),
+    (user) => user.username.toLowerCase() === subject.toLowerCase(),
   );
-  if (!configured || configured.role !== value.role) return null;
-  return {
-    v: 1,
-    sub: value.sub,
-    role: value.role,
-    iat: value.iat,
-    exp: value.exp,
-  };
+  if (!configured || configured.role !== role) return null;
+  return { v: 1, sub: subject, role, iat: issuedAt, exp: expiresAt };
 }
 
 export function cookieSecure(): boolean {
