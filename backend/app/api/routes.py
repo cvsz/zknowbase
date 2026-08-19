@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.core.config import Settings, get_settings
+from app.core.file_security import scan_upload
 from app.core.security import Principal, require_scopes
 from app.ingestion_service import index_document
 from app.models.schemas import (
@@ -81,6 +82,7 @@ async def ingest_file(
     docs = document_store(settings)
     docs.upsert(record)
     try:
+        await scan_upload(filename, data, settings)
         text = parse_bytes(filename, data)
         saved = settings.upload_dir / f"{doc_id}{Path(filename).suffix.lower()}"
         saved.write_bytes(data)
@@ -132,8 +134,10 @@ async def preview(
     data = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
     if len(data) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, "File exceeds upload limit")
+    filename = Path(file.filename or "upload").name
     try:
-        chunks = split_text(parse_bytes(Path(file.filename or "upload").name, data), settings)
+        await scan_upload(filename, data, settings)
+        chunks = split_text(parse_bytes(filename, data), settings)
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
     return PreviewResponse(
@@ -185,7 +189,9 @@ async def reindex_document(
             text, record.content_type = await fetch_url_text(record.source_uri, settings)
         elif record.source_uri:
             path = Path(record.source_uri)
-            text = parse_bytes(path.name, path.read_bytes())
+            data = path.read_bytes()
+            await scan_upload(path.name, data, settings)
+            text = parse_bytes(path.name, data)
         else:
             raise ValueError("Document source is unavailable")
         record.status, record.updated_at = "processing", utcnow()
