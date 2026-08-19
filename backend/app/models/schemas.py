@@ -17,6 +17,7 @@ TENANT_ID_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
 class DocumentRecord(BaseModel):
     id: str
     name: str
+    tenant_id: str = Field(default="default", min_length=1, max_length=63, pattern=TENANT_ID_PATTERN)
     source_type: str
     source_uri: str | None = None
     content_type: str | None = None
@@ -63,6 +64,7 @@ class SearchRequest(BaseModel):
 class SourceCitation(BaseModel):
     document_id: str
     document_name: str
+    tenant_id: str = Field(default="default", min_length=1, max_length=63, pattern=TENANT_ID_PATTERN)
     chunk_id: str
     chunk_index: int
     score: float

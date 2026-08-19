@@ -44,6 +44,7 @@ class PostgresDocumentStore(_PostgresBase):
                 """
                 CREATE TABLE IF NOT EXISTS documents (
                   id TEXT PRIMARY KEY,
+                  tenant_id TEXT NOT NULL DEFAULT 'default',
                   name TEXT NOT NULL,
                   source_type TEXT NOT NULL,
                   source_uri TEXT,
@@ -58,7 +59,11 @@ class PostgresDocumentStore(_PostgresBase):
                 """
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_documents_created ON documents(created_at DESC)"
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_documents_tenant_created "
+                "ON documents(tenant_id, created_at DESC)"
             )
 
     def upsert(self, record: DocumentRecord) -> DocumentRecord:
@@ -67,10 +72,11 @@ class PostgresDocumentStore(_PostgresBase):
             conn.execute(
                 """
                 INSERT INTO documents
-                (id,name,source_type,source_uri,content_type,status,chunk_count,size_bytes,created_at,updated_at,error)
-                VALUES (%(id)s,%(name)s,%(source_type)s,%(source_uri)s,%(content_type)s,%(status)s,
+                (id,tenant_id,name,source_type,source_uri,content_type,status,chunk_count,size_bytes,created_at,updated_at,error)
+                VALUES (%(id)s,%(tenant_id)s,%(name)s,%(source_type)s,%(source_uri)s,%(content_type)s,%(status)s,
                         %(chunk_count)s,%(size_bytes)s,%(created_at)s,%(updated_at)s,%(error)s)
                 ON CONFLICT(id) DO UPDATE SET
+                  tenant_id=EXCLUDED.tenant_id,
                   name=EXCLUDED.name,
                   source_type=EXCLUDED.source_type,
                   source_uri=EXCLUDED.source_uri,

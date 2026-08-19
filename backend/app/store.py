@@ -25,6 +25,7 @@ class DocumentStore:
                 """
                 CREATE TABLE IF NOT EXISTS documents (
                   id TEXT PRIMARY KEY,
+                  tenant_id TEXT NOT NULL DEFAULT 'default',
                   name TEXT NOT NULL,
                   source_type TEXT NOT NULL,
                   source_uri TEXT,
@@ -38,6 +39,18 @@ class DocumentStore:
                 )
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(documents)").fetchall()
+            }
+            if "tenant_id" not in columns:
+                conn.execute(
+                    "ALTER TABLE documents ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
+                )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_documents_tenant_created "
+                "ON documents(tenant_id, created_at DESC)"
+            )
             conn.commit()
 
     def upsert(self, record: DocumentRecord) -> DocumentRecord:
@@ -48,10 +61,10 @@ class DocumentStore:
             conn.execute(
                 """
                 INSERT INTO documents
-                (id,name,source_type,source_uri,content_type,status,chunk_count,size_bytes,created_at,updated_at,error)
-                VALUES (:id,:name,:source_type,:source_uri,:content_type,:status,:chunk_count,:size_bytes,:created_at,:updated_at,:error)
+                (id,tenant_id,name,source_type,source_uri,content_type,status,chunk_count,size_bytes,created_at,updated_at,error)
+                VALUES (:id,:tenant_id,:name,:source_type,:source_uri,:content_type,:status,:chunk_count,:size_bytes,:created_at,:updated_at,:error)
                 ON CONFLICT(id) DO UPDATE SET
-                  name=excluded.name, source_type=excluded.source_type,
+                  tenant_id=excluded.tenant_id, name=excluded.name, source_type=excluded.source_type,
                   source_uri=excluded.source_uri, content_type=excluded.content_type,
                   status=excluded.status, chunk_count=excluded.chunk_count,
                   size_bytes=excluded.size_bytes, updated_at=excluded.updated_at,

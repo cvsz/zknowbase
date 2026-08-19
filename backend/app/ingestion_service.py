@@ -20,8 +20,9 @@ async def index_document(
         raise ValueError("No extractable text found")
     vectors = await AIProviders(settings).embed(chunks)
     vector_store = VectorStore(settings)
-    await vector_store.delete_document(record.id)
+    await vector_store.delete_document(record.tenant_id, record.id)
     await vector_store.upsert_chunks(
+        record.tenant_id,
         record.id,
         record.name,
         record.source_uri,
