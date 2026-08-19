@@ -7,9 +7,10 @@ import shutil
 import sqlite3
 import tarfile
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from uuid import uuid4
 
 import httpx
@@ -17,6 +18,13 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from app.backup_crypto import (
+    BackupCryptoError,
+    decrypt_archive,
+    encrypt_archive,
+    is_encrypted_archive,
+    load_key_file,
+)
 from app.core.config import Settings, get_settings
 from app.maintenance import mutation_lock
 from app.store_factory import document_store, ingestion_queue, security_store
@@ -52,6 +60,38 @@ def _json_default(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc).isoformat()
     raise TypeError(f"Unsupported backup value: {type(value)!r}")
+
+
+def _backup_key(settings: Settings) -> bytes | None:
+    if settings.backup_encryption_key_file is None:
+        if settings.backup_require_encryption:
+            raise BackupError("Backup encryption is required but no key file is configured")
+        return None
+    try:
+        return load_key_file(settings.backup_encryption_key_file)
+    except BackupCryptoError as exc:
+        raise BackupError(str(exc)) from exc
+
+
+@contextmanager
+def _readable_archive(settings: Settings, archive: Path, temp_root: Path) -> Iterator[Path]:
+    if not is_encrypted_archive(archive):
+        if settings.backup_require_encryption:
+            raise BackupError("Unencrypted backup rejected by encryption policy")
+        yield archive
+        return
+    key = _backup_key(settings)
+    if key is None:
+        raise BackupError("Encrypted backup requires ZKB_BACKUP_ENCRYPTION_KEY_FILE")
+    plain = temp_root / "decrypted-backup.tar.gz"
+    try:
+        decrypt_archive(archive, plain, key)
+    except BackupCryptoError as exc:
+        raise BackupError(str(exc)) from exc
+    try:
+        yield plain
+    finally:
+        plain.unlink(missing_ok=True)
 
 
 def _safe_member_path(root: Path, member_name: str) -> Path:
@@ -163,10 +203,6 @@ def _restore_postgres(settings: Settings, source_path: Path) -> None:
             for table in POSTGRES_TABLES:
                 rows = tables.get(table)
                 if rows is None and table in POSTGRES_TENANT_MAPPING_TABLES:
-                    # Backward compatibility for pre-tenant FORMAT_VERSION=1 archives.
-                    # Tenant wrappers deterministically remap restored legacy keys/jobs
-                    # to ZKB_DEFAULT_TENANT_ID when they are first observed. Legacy
-                    # audit ownership falls back to the restored key tenant mapping.
                     continue
                 if not isinstance(rows, list):
                     raise BackupError(f"Missing Postgres table backup: {table}")
@@ -180,10 +216,7 @@ def _restore_postgres(settings: Settings, source_path: Path) -> None:
                         values[index] = Jsonb(values[index])
                     placeholders = ",".join(["%s"] * len(columns))
                     names = ",".join(columns)
-                    conn.execute(
-                        f"INSERT INTO {table} ({names}) VALUES ({placeholders})",
-                        values,
-                    )
+                    conn.execute(f"INSERT INTO {table} ({names}) VALUES ({placeholders})", values)
 
 
 class QdrantSnapshots:
@@ -220,7 +253,9 @@ class QdrantSnapshots:
             return None
         collection = self.settings.qdrant_collection
         async with await self._client() as client:
-            created = await client.post(f"/collections/{collection}/snapshots", params={"wait": "true"})
+            created = await client.post(
+                f"/collections/{collection}/snapshots", params={"wait": "true"}
+            )
             created.raise_for_status()
             result = created.json().get("result")
             if not isinstance(result, dict) or not isinstance(result.get("name"), str):
@@ -232,8 +267,7 @@ class QdrantSnapshots:
                 output.write_bytes(download.content)
             finally:
                 cleanup = await client.delete(
-                    f"/collections/{collection}/snapshots/{name}",
-                    params={"wait": "true"},
+                    f"/collections/{collection}/snapshots/{name}", params={"wait": "true"}
                 )
                 cleanup.raise_for_status()
             return {
@@ -279,9 +313,7 @@ def _write_manifest(
 ) -> dict[str, Any]:
     component_names = ["uploads.tar.gz"]
     metadata_name = (
-        "metadata.sqlite"
-        if settings.metadata_backend == "sqlite"
-        else "metadata.postgres.json"
+        "metadata.sqlite" if settings.metadata_backend == "sqlite" else "metadata.postgres.json"
     )
     component_names.append(metadata_name)
     if qdrant is not None:
@@ -302,8 +334,7 @@ def _write_manifest(
         "components": components,
     }
     (workdir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True),
-        encoding="utf-8",
+        json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
     )
     return manifest
 
@@ -338,9 +369,11 @@ async def create_backup(
     lock: bool = True,
 ) -> Path:
     settings.ensure_paths()
+    key = _backup_key(settings)
     if output is None:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        output = settings.backup_dir / f"zknowbase-{timestamp}.tar.gz"
+        suffix = ".zkb" if key is not None else ".tar.gz"
+        output = settings.backup_dir / f"zknowbase-{timestamp}{suffix}"
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists():
@@ -364,10 +397,20 @@ async def create_backup(
             version = await qdrant_client.version()
             snapshot = await qdrant_client.create_download(workdir / "qdrant.snapshot")
             _write_manifest(workdir, settings, version, snapshot)
-            with tarfile.open(output, "w:gz") as tar:
+            plain_archive = workdir / "backup.tar.gz"
+            with tarfile.open(plain_archive, "w:gz") as tar:
                 for path in sorted(workdir.iterdir()):
-                    tar.add(path, arcname=path.name, recursive=False)
-            os.chmod(output, 0o600)
+                    if path != plain_archive:
+                        tar.add(path, arcname=path.name, recursive=False)
+            if key is None:
+                shutil.copyfile(plain_archive, output)
+                os.chmod(output, 0o600)
+            else:
+                try:
+                    encrypt_archive(plain_archive, output, key)
+                except BackupCryptoError as exc:
+                    output.unlink(missing_ok=True)
+                    raise BackupError(str(exc)) from exc
     finally:
         if lock:
             lock_context.__exit__(None, None, None)
@@ -388,8 +431,11 @@ async def restore_backup(
         raise BackupError(f"Backup archive not found: {archive}")
 
     with tempfile.TemporaryDirectory(prefix="zkb-restore-") as raw:
-        workdir = Path(raw)
-        _safe_extract_archive(archive, workdir)
+        temp_root = Path(raw)
+        workdir = temp_root / "workdir"
+        workdir.mkdir()
+        with _readable_archive(settings, archive, temp_root) as readable:
+            _safe_extract_archive(readable, workdir)
         manifest = _verify_workdir(workdir)
         if manifest.get("metadata_backend") != settings.metadata_backend:
             raise BackupError(
@@ -418,10 +464,8 @@ async def restore_backup(
             safety_path = None
             if safety_backup:
                 timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                safety_path = (
-                    settings.backup_dir
-                    / f"pre-restore-{timestamp}-{uuid4().hex[:8]}.tar.gz"
-                )
+                suffix = ".zkb" if _backup_key(settings) is not None else ".tar.gz"
+                safety_path = settings.backup_dir / f"pre-restore-{timestamp}-{uuid4().hex[:8]}{suffix}"
                 await create_backup(settings, safety_path, lock=False)
 
             snapshot_info = qdrant_manifest.get("snapshot")
@@ -443,6 +487,19 @@ async def restore_backup(
             return safety_path
 
 
+def verify_backup(settings: Settings, archive: Path) -> dict[str, Any]:
+    archive = archive.resolve()
+    if not archive.is_file():
+        raise BackupError(f"Backup archive not found: {archive}")
+    with tempfile.TemporaryDirectory(prefix="zkb-verify-") as raw:
+        temp_root = Path(raw)
+        workdir = temp_root / "workdir"
+        workdir.mkdir()
+        with _readable_archive(settings, archive, temp_root) as readable:
+            _safe_extract_archive(readable, workdir)
+        return _verify_workdir(workdir)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Local zknowbase backup/restore")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -462,13 +519,18 @@ async def _main_async() -> int:
     settings = get_settings()
     if args.command == "backup":
         path = await create_backup(settings, args.output)
-        print(json.dumps({"backup": str(path), "sha256": sha256_file(path)}))
+        print(
+            json.dumps(
+                {
+                    "backup": str(path),
+                    "sha256": sha256_file(path),
+                    "encrypted": is_encrypted_archive(path),
+                }
+            )
+        )
         return 0
     if args.command == "verify":
-        with tempfile.TemporaryDirectory(prefix="zkb-verify-") as raw:
-            workdir = Path(raw)
-            _safe_extract_archive(args.archive.resolve(), workdir)
-            manifest = _verify_workdir(workdir)
+        manifest = verify_backup(settings, args.archive)
         print(json.dumps({"valid": True, "manifest": manifest}, sort_keys=True))
         return 0
     safety = await restore_backup(
