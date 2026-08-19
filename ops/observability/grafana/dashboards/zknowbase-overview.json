@@ -1,0 +1,72 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "API request rate",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "sum(rate(zkb_http_requests_total[5m])) by (status)", "legendFormat": "{{status}}"}]
+    },
+    {
+      "type": "timeseries",
+      "title": "API p95 latency",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"expr": "histogram_quantile(0.95, sum(rate(zkb_http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95"}]
+    },
+    {
+      "type": "timeseries",
+      "title": "Query / retrieval p95 latency",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(zkb_query_duration_seconds_bucket[5m])) by (le))", "legendFormat": "query"},
+        {"expr": "histogram_quantile(0.95, sum(rate(zkb_search_duration_seconds_bucket[5m])) by (le))", "legendFormat": "search"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Provider p95 latency",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(zkb_embedding_duration_seconds_bucket[5m])) by (le, provider))", "legendFormat": "embed {{provider}}"},
+        {"expr": "histogram_quantile(0.95, sum(rate(zkb_llm_duration_seconds_bucket[5m])) by (le, provider))", "legendFormat": "llm {{provider}}"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Ingestion queue depth",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 16},
+      "targets": [{"expr": "zkb_ingestion_queue_depth"}]
+    },
+    {
+      "type": "timeseries",
+      "title": "Ingestion failures",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 16},
+      "targets": [{"expr": "increase(zkb_ingestion_failures_total[1h])"}]
+    },
+    {
+      "type": "timeseries",
+      "title": "Auth denials",
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 16},
+      "targets": [
+        {"expr": "increase(zkb_auth_failures_total[1h])", "legendFormat": "authentication"},
+        {"expr": "sum(increase(zkb_authorization_denials_total[1h]))", "legendFormat": "authorization"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Qdrant errors",
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 16},
+      "targets": [{"expr": "sum(increase(zkb_qdrant_errors_total[1h])) by (operation)", "legendFormat": "{{operation}}"}]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["zknowbase", "slo", "local-first"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "zknowbase Local SLO Overview",
+  "uid": "zknowbase-slo",
+  "version": 1
+}
