@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.queue_routes import router as queue_router
 from app.api.routes import router
 from app.core.config import get_settings
-from app.maintenance import async_mutation_lock, is_mutating_api_request
+from app.maintenance import async_mutation_lock, requires_data_lock
 
 settings = get_settings()
 app = FastAPI(title="zknowbase", version="0.1.0", docs_url="/docs", redoc_url="/redoc")
@@ -21,7 +21,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def local_backup_barrier(request: Request, call_next):
-    if not is_mutating_api_request(request.method, request.url.path):
+    if not requires_data_lock(request.url.path):
         return await call_next(request)
     async with async_mutation_lock(settings.maintenance_lock_path, exclusive=False):
         return await call_next(request)
