@@ -90,7 +90,8 @@ def require_scopes(*required: str):
                 "authorize",
                 f"{request.method} {request.url.path}",
                 "denied",
-                f"tenant={principal.tenant_id};missing scopes:{','.join(missing)}",
+                f"missing scopes:{','.join(missing)}",
+                tenant_id=principal.tenant_id,
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
