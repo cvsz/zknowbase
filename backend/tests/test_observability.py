@@ -38,6 +38,18 @@ def test_metrics_endpoint_exposes_bounded_zknowbase_metrics():
     assert "X-API-Key" not in body
 
 
+def test_unmatched_routes_do_not_create_unbounded_path_labels():
+    client = TestClient(app)
+    first = "/definitely-missing-cardinality-a"
+    second = "/definitely-missing-cardinality-b"
+    assert client.get(first).status_code == 404
+    assert client.get(second).status_code == 404
+    body = client.get("/metrics").text
+    assert first not in body
+    assert second not in body
+    assert 'route="__unmatched__"' in body
+
+
 def test_metrics_disabled_returns_not_found(monkeypatch):
     monkeypatch.setattr("app.main.settings.metrics_enabled", False)
     try:
