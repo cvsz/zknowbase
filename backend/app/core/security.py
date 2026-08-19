@@ -50,7 +50,6 @@ def authenticate_principal(
             bootstrap=True,
         )
         request.state.principal = principal
-        store.audit(principal.id, principal.key_prefix, "authenticate", resource, "allowed")
         return principal
 
     key = store.verify(supplied)
@@ -75,7 +74,6 @@ def authenticate_principal(
         scopes=frozenset(key.scopes),
     )
     request.state.principal = principal
-    store.audit(principal.id, principal.key_prefix, "authenticate", resource, "allowed")
     return principal
 
 
