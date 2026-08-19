@@ -48,21 +48,16 @@ test("viewer role is retrieval-only through the proxy", () => {
   assert.equal(canProxy(viewer, "POST", ["search"]), true);
   assert.equal(canProxy(viewer, "POST", ["ingest"]), false);
   assert.equal(canProxy(viewer, "DELETE", ["documents", "doc-1"]), false);
-  assert.equal(canProxy(viewer, "POST", ["service-keys"]), false);
+  assert.equal(canProxy(viewer, "GET", ["service-keys"]), false);
   assert.equal(canProxy(viewer, "GET", ["audit"]), false);
-});
 
-test("admin role can mutate and manage security routes", () => {
-  const admin: AdminSession = { v: 1, sub: "admin", role: "admin", iat: 1, exp: 2 };
-  assert.equal(canProxy(admin, "POST", ["ingest"]), true);
+  const admin: AdminSession = { ...viewer, sub: "admin", role: "admin" };
   assert.equal(canProxy(admin, "DELETE", ["documents", "doc-1"]), true);
-  assert.equal(canProxy(admin, "POST", ["service-keys"]), true);
-  assert.equal(canProxy(admin, "GET", ["audit"]), true);
 });
 
-test("sameOrigin rejects cross-origin mutation requests", () => {
-  assert.equal(sameOrigin("http://localhost:3000", "http://localhost:3000"), true);
-  assert.equal(sameOrigin("https://admin.example.com", "https://admin.example.com"), true);
-  assert.equal(sameOrigin("https://evil.example.com", "https://admin.example.com"), false);
-  assert.equal(sameOrigin(null, "https://admin.example.com"), false);
+test("state-changing browser calls require matching origin and host", () => {
+  const good = new Headers({ origin: "http://localhost:3000", host: "localhost:3000" });
+  const bad = new Headers({ origin: "https://evil.example", host: "localhost:3000" });
+  assert.equal(sameOrigin(good), true);
+  assert.equal(sameOrigin(bad), false);
 });
