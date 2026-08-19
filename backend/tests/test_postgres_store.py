@@ -93,6 +93,11 @@ def test_postgres_queue_claim_is_worker_owned():
     pool = create_postgres_pool(POSTGRES_URL, min_size=1, max_size=3)
     queue = PostgresIngestionQueue(pool)
     try:
+        # This test owns queue ordering; remove state left by earlier integration tests
+        # before asserting that the next claimed job is the one created below.
+        with pool.connection() as conn:
+            conn.execute("DELETE FROM ingestion_jobs")
+
         job = queue.enqueue(
             f"doc-{uuid4().hex[:8]}",
             "file",
