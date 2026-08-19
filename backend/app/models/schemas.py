@@ -1,7 +1,14 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl
+
+ServiceKeyScope = Literal[
+    "knowledge:read",
+    "knowledge:write",
+    "keys:admin",
+    "audit:read",
+]
 
 
 class DocumentRecord(BaseModel):
@@ -73,3 +80,37 @@ class HealthResponse(BaseModel):
     status: str
     qdrant: str
     metadata_store: str
+
+
+class ServiceKeyCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    scopes: list[ServiceKeyScope] = Field(min_length=1, max_length=4)
+    expires_at: datetime | None = None
+
+
+class ServiceKeyRecord(BaseModel):
+    id: str
+    name: str
+    key_prefix: str
+    scopes: list[str]
+    created_at: datetime
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+    last_used_at: datetime | None = None
+    rotated_from: str | None = None
+
+
+class ServiceKeyCreateResponse(BaseModel):
+    key: ServiceKeyRecord
+    secret: str
+
+
+class AuditRecord(BaseModel):
+    id: str
+    principal_id: str | None = None
+    key_prefix: str | None = None
+    action: str
+    resource: str
+    outcome: str
+    detail: str | None = None
+    created_at: datetime
