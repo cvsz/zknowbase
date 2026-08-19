@@ -1,2 +1,0 @@
-[lint.per-file-ignores]
-"app/backup.py" = ["F401"]
