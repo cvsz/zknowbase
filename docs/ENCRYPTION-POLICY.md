@@ -17,9 +17,9 @@ SQLite and Postgres metadata rows carry or are joined to durable tenant ownershi
 | Authentication secrets | bootstrap key, Admin session secret, optional cloud API keys, OIDC client secret | Must never be committed. Store only in operator-controlled environment/secret files with restrictive permissions; production host/volume encryption is required. | TLS outside loopback/private trusted development boundaries. |
 | Service keys | generated `zkb_*` bearer credentials | Plaintext is returned only at creation/rotation and must not be persisted by zknowbase. zknowbase stores SHA-256 digests only. | TLS outside loopback/private trusted development boundaries. |
 | Admin passwords | local human credentials | scrypt password hashes only; plaintext passwords are not persisted. | TLS outside loopback/private trusted development boundaries. |
-| Knowledge content | uploads, extracted metadata, SQLite/Postgres rows, Qdrant vectors/payloads | Production deployments containing sensitive data must use host/filesystem/volume encryption. zknowbase does not claim application-level encryption for arbitrary document fields. | TLS whenever traffic crosses a host trust boundary. |
+| Knowledge content | uploads, extracted metadata, SQLite/Postgres rows, Qdrant vectors/payloads | Production deployments containing sensitive data must use host/filesystem/volume encryption. zknowbase does not claim application-level encryption for arbitrary live document fields. | TLS whenever traffic crosses a host trust boundary. |
 | Tenant ownership/audit metadata | tenant IDs, service-key mappings, ingestion-job mappings, audit ownership | Protected by the same encrypted metadata volume/database storage as other metadata. | TLS whenever traffic crosses a host trust boundary. |
-| Backups | metadata, uploads, Qdrant snapshots | Backup archives are integrity-protected by SHA-256 manifests and owner-only permissions, but the current archive format is not application-encrypted. Sensitive backups MUST additionally be stored on encrypted media or wrapped by an operator-approved standard encryption tool before leaving the trusted host. | Use authenticated encrypted transport when copying backups. |
+| Backups | metadata, uploads, Qdrant snapshots | zknowbase can wrap portable archives in an authenticated AES-256-GCM envelope using an operator-owned local key. Production may fail closed on plaintext backups with `ZKB_BACKUP_REQUIRE_ENCRYPTION=true`. | Use authenticated encrypted transport when copying backups. |
 
 ## Approved cryptography
 
@@ -30,10 +30,23 @@ Current application cryptography/security primitives include:
 - `scrypt` for local Admin password hashing.
 - HMAC-signed Admin session state using the configured session secret.
 - SHA-256 digests for generated high-entropy service-key verification and backup integrity manifests.
+- AES-256-GCM for optional authenticated portable-backup encryption, implemented through the `cryptography` package with a fresh 96-bit nonce and fixed versioned additional authenticated data for every archive.
 - OIDC Authorization Code flow with PKCE for optional self-hosted identity-provider login.
 - TLS termination supplied by the deployment boundary for traffic leaving a trusted local development boundary.
 
-For storage encryption, operators must use established platform mechanisms such as LUKS/dm-crypt, encrypted VM disks, encrypted ZFS datasets, BitLocker-backed host volumes where applicable, or an equivalent reviewed filesystem/block-device mechanism. Database-native encryption may be used when it is self-hosted and operationally managed, but it does not replace filesystem/backup protection for uploaded files and Qdrant snapshots.
+For live storage encryption, operators must use established platform mechanisms such as LUKS/dm-crypt, encrypted VM disks, encrypted ZFS datasets, BitLocker-backed host volumes where applicable, or an equivalent reviewed filesystem/block-device mechanism. Database-native encryption may be used when it is self-hosted and operationally managed, but it does not replace filesystem protection for uploaded files and live Qdrant storage.
+
+## Backup encryption envelope
+
+When `ZKB_BACKUP_ENCRYPTION_KEY_FILE` is configured, `zknowbase backup` writes a `.zkb` envelope instead of a plaintext `.tar.gz` archive. The key file contains strict base64 encoding of exactly 32 random bytes. On POSIX platforms it must not be group/world accessible. The envelope uses:
+
+- AES-256-GCM;
+- a fresh 12-byte nonce for every archive;
+- versioned magic and additional authenticated data;
+- bounded 1 MiB streaming encryption/decryption;
+- the GCM authentication tag to reject wrong keys, modification, or truncation before archive parsing or restore mutation.
+
+`ZKB_BACKUP_REQUIRE_ENCRYPTION=true` rejects plaintext backup verification/restore and is invalid unless a backup key file is configured. When encryption is configured, pre-restore safety backups use the same encrypted envelope. The encryption key is never embedded in the archive.
 
 ## Key ownership
 
@@ -45,7 +58,7 @@ Production requirements:
 2. `ZKB_ADMIN_SESSION_SECRET` must be high entropy and stored outside source control.
 3. Optional provider/OIDC secrets must remain server-side and must never be exposed through `NEXT_PUBLIC_*`, browser payloads, logs, audit detail, or telemetry.
 4. Host/volume encryption keys must be managed separately from the data they protect and must be recoverable under the organization's disaster-recovery procedure.
-5. Backup encryption keys, when backups leave encrypted trusted storage, must be retained independently from the backup archive and included in recovery-key escrow/rotation procedures.
+5. `ZKB_BACKUP_ENCRYPTION_KEY_FILE` must be mounted from operator-controlled secret storage, kept separate from backup archives, and included in recovery-key escrow/rotation procedures.
 
 ## Rotation
 
@@ -54,31 +67,32 @@ Production requirements:
 - Admin session secret: changing it intentionally invalidates all active Admin sessions. Coordinate rotation as an authentication maintenance event.
 - OIDC/provider secrets: rotate at the provider and deployment secret boundary; never commit replacement values.
 - Storage/volume keys: use the host platform's supported rekey procedure and validate both normal startup and restore before retiring old recovery material.
-- Backup wrapping keys: retain old decryption material until every archive encrypted with it has expired or been re-encrypted and restore-tested.
+- Backup encryption keys: retain old decryption material until every `.zkb` archive encrypted with it has expired or has been decrypted and re-encrypted with the replacement key, and restore-test at least one resulting archive before retiring the old key.
 
 ## Backup and disaster recovery
 
-The native backup archive currently provides integrity verification, safe extraction checks, owner-only file permissions, pre-restore safety backup, tenant-mapping preservation, and Qdrant version compatibility checks. It does **not** claim confidentiality by itself.
+The native backup path provides integrity manifests, safe extraction checks, owner-only archive permissions, pre-restore safety backup, tenant-mapping preservation, Qdrant version compatibility checks, and optional authenticated AES-256-GCM confidentiality.
 
-Therefore:
+Production guidance:
 
-- A backup remaining exclusively on an encrypted trusted volume is covered by the volume-encryption boundary.
-- A backup copied off that boundary must first be encrypted with an operator-approved standard tool or placed into equivalently encrypted storage.
-- Restore drills must include availability of encryption/recovery keys in addition to zknowbase archive integrity checks.
-- Losing storage or backup encryption keys is an availability failure; exposing them is a confidentiality incident and requires credential/key rotation according to the affected scope.
+- Set `ZKB_BACKUP_ENCRYPTION_KEY_FILE` to an owner-only local secret file for portable backups containing sensitive data.
+- Set `ZKB_BACKUP_REQUIRE_ENCRYPTION=true` when policy requires fail-closed rejection of plaintext archives.
+- Keep the encryption key independent from the backup archive and test recovery-key availability during DR drills.
+- Existing plaintext archives remain supported only when encryption is not required, preserving local-development and legacy restore compatibility.
+- Losing the encryption key is an availability failure; exposing it is a confidentiality incident and requires key rotation according to archive retention scope.
 
 ## Logging and telemetry
 
-Logs, audit records, metrics, and traces must not contain API keys, raw bearer tokens, passwords, Admin cookies/session secrets, OIDC tokens, cloud-provider credentials, or document body text by default. Tenant IDs and opaque resource IDs may be recorded when required for authorization/audit attribution.
+Logs, audit records, metrics, and traces must not contain API keys, raw bearer tokens, passwords, Admin cookies/session secrets, OIDC tokens, cloud-provider credentials, backup encryption keys, or document body text by default. Tenant IDs and opaque resource IDs may be recorded when required for authorization/audit attribution.
 
 ## Non-claims
 
 zknowbase currently does not claim:
 
-- field-level encryption of arbitrary document metadata;
-- application-layer encryption of Qdrant vectors or uploaded document bytes;
+- field-level encryption of arbitrary live document metadata;
+- application-layer encryption of live Qdrant vectors or uploaded document bytes;
 - transparent database encryption supplied by zknowbase itself;
-- application-encrypted native backup archives.
+- protection from an attacker who has both a `.zkb` archive and its encryption key.
 
 These are deliberate boundaries, not hidden guarantees. Deployments that require cryptographic separation even from the host/storage administrator need an additional envelope/field-encryption design and key-management threat model before that capability can be claimed.
 
@@ -90,5 +104,6 @@ A release may claim this policy is implemented only when:
 - generated service-key plaintext is not persisted;
 - local Admin password/session boundaries remain tested;
 - backup/restore preserves tenant ownership and archive integrity;
-- production documentation explicitly requires encrypted storage for sensitive at-rest data and encrypted transport outside trusted local development boundaries;
-- no documentation claims application-level encryption that the source code does not provide.
+- encrypted backup round-trip, wrong-key, tamper, plaintext-policy, and key-permission regression tests are green;
+- production documentation explicitly requires encrypted storage for sensitive live data and encrypted transport outside trusted local development boundaries;
+- no documentation claims field/live-vector encryption that the source code does not provide.
