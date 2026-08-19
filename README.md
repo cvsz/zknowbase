@@ -13,16 +13,19 @@ The default architecture is intentionally self-hosted:
 - FastAPI backend + ingestion worker
 - Next.js Admin UI
 - Docker Compose
+- in-process document security validation before parsing
 
-No managed database, Redis, Celery, hosted queue, or paid model API is required for the core platform. OpenAI, Anthropic, and Gemini remain optional adapters only.
+No managed database, Redis, Celery, hosted queue, paid malware scanner, or paid model API is required for the core platform. OpenAI, Anthropic, and Gemini remain optional adapters only.
 
-For larger self-hosted installations, local Postgres is available through the optional Compose `ha` profile; SQLite remains the single-node default.
+For larger self-hosted installations, local Postgres is available through the optional Compose `ha` profile; SQLite remains the single-node default. For stronger local upload scanning, ClamAV is available through the optional `security` profile.
 
 ## What is included
 
 - FastAPI backend with OpenAPI docs
 - synchronous and durable asynchronous PDF/Markdown/TXT ingestion
 - public URL ingestion with SSRF guardrails
+- pre-parser upload validation, including PDF active-content rejection
+- optional local ClamAV malware scanning with fail-closed behavior
 - DB-backed ingestion jobs with leases, heartbeat renewal, retries, crash recovery, cancellation, and worker ownership
 - SQLite WAL queue for the default local deployment
 - optional Postgres `FOR UPDATE SKIP LOCKED` queue for multiple local workers
@@ -43,6 +46,7 @@ For larger self-hosted installations, local Postgres is available through the op
 Browser
   -> Next.js Admin (server-side scoped key)
       -> FastAPI /api/v1
+          -> upload security validation
           -> SQLite default / local Postgres optional
                -> document metadata
                -> service keys + audit
@@ -50,9 +54,10 @@ Browser
           -> Qdrant vectors
           -> Ollama embeddings / LLM
 
-Async ingest
+Async file ingest
   -> durable DB queue
       -> local worker
+          -> upload security validation / optional local ClamAV
           -> parser/chunker
           -> Ollama embedding
           -> Qdrant
@@ -90,6 +95,27 @@ ZKB_POSTGRES_URL='postgresql://zknowbase:replace-this@postgres:5432/zknowbase'
 docker compose --profile ha up --build
 ```
 
+### Optional local ClamAV profile
+
+The default `ZKB_MALWARE_SCAN_MODE=validate` performs zero-service structural validation before parsing. It rejects unsupported/empty documents, text containing NUL bytes, malformed PDF magic/structure, and PDFs containing active-content constructs such as JavaScript, launch actions, embedded files, XFA, or rich-media/file-attachment annotations.
+
+For local antivirus scanning as well:
+
+```bash
+# in .env
+ZKB_MALWARE_SCAN_MODE=clamav
+
+docker compose --profile security up --build
+```
+
+ClamAV runs only on the internal Compose network; port 3310 is not published to the host. When `clamav` mode is selected, scanner timeout/unavailability or an unexpected scanner response fails closed. `/api/v1/health` reports scanner readiness.
+
+The local HA and security profiles can be combined:
+
+```bash
+docker compose --profile ha --profile security up --build
+```
+
 ## API scopes
 
 `GET /api/v1/health` is unauthenticated. Other endpoints require `X-API-Key` and the corresponding scope.
@@ -105,7 +131,7 @@ docker compose --profile ha up --build
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/api/v1/health` | backend/Qdrant/metadata/queue readiness |
+| GET | `/api/v1/health` | backend/Qdrant/metadata/queue/scanner readiness |
 | POST | `/api/v1/ingest` | synchronous PDF/MD/TXT ingestion |
 | POST | `/api/v1/ingest/url` | synchronous public URL ingestion |
 | POST | `/api/v1/ingest/async` | durable file enqueue; returns HTTP 202 |
@@ -113,7 +139,7 @@ docker compose --profile ha up --build
 | GET | `/api/v1/ingest/jobs` | list ingestion jobs |
 | GET | `/api/v1/ingest/jobs/{id}` | job status/attempt/lease/error |
 | DELETE | `/api/v1/ingest/jobs/{id}` | cancel a job while it is still queued |
-| POST | `/api/v1/ingest/preview` | preview chunks |
+| POST | `/api/v1/ingest/preview` | security-check and preview chunks |
 | GET | `/api/v1/documents` | document lifecycle records |
 | POST | `/api/v1/documents/{id}/reindex` | synchronous reindex; blocked while async job active |
 | DELETE | `/api/v1/documents/{id}` | remove metadata/file/vectors; blocked while async job active |
@@ -235,19 +261,20 @@ Leaving cloud keys empty keeps the platform on the local path.
 - Production startup rejects the default bootstrap key while bootstrap authentication is enabled.
 - Generated service keys are high-entropy bearer tokens; plaintext is returned once and never persisted.
 - Scopes are enforced server-side and denied attempts are audited.
+- File uploads are structurally validated before any parser receives their bytes; ClamAV scanning can be enabled locally without a hosted security service.
 - SQLite uses WAL/busy-timeout for backend + worker concurrency; Postgres is preferred before horizontally scaling many local processes.
 - Queue completion/failure requires current worker ownership; stale workers cannot overwrite reclaimed jobs.
 - Async uploads reject unsupported file suffixes before entering the retry queue.
 - URL ingestion permits public HTTP(S), rejects non-global DNS resolutions and redirects, and bounds response size. High-assurance deployments should additionally constrain egress at the network layer.
-- Do not expose Qdrant or Ollama directly to untrusted networks.
+- Do not expose Qdrant, Ollama, or clamd directly to untrusted networks.
 - Human Admin identity still requires the local/OIDC RBAC hardening slice; service keys are the service-to-service boundary.
 
 ## Validation
 
 GitHub Actions validates:
 
-- backend: dependency install, Ruff, pytest, and real local Postgres integration tests
+- backend: dependency install, Ruff, pytest, upload-security tests, and real local Postgres integration tests
 - frontend: Next.js production build
-- compose: default SQLite stack and optional `--profile ha` configuration
+- compose: default SQLite stack plus `ha`, `security`, and combined local profiles
 
 See [`exec-planning.md`](./exec-planning.md) for the remaining local-first production hardening work.
