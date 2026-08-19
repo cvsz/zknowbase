@@ -30,11 +30,22 @@ The same run also completed backend lint/tests, frontend auth tests and producti
 
 This benchmark is a repeatable component regression guardrail. It is not represented as a universal end-to-end `/query` latency guarantee because Ollama model latency and deployment hardware remain workload-specific.
 
+## Representative production service-API E2E
+
+- Pull request: #39, `test: add representative production API E2E evidence`
+- Exact final PR head: `ec993e88f30604372d7f2a06e01a6458ac42eba8`
+- Merge commit: `2bbae7638d41ce17d559e148d5763cc6df568f5e`
+- CI run: `32245742977`, conclusion `success`
+- Executable evidence: `backend/tests/test_production_e2e_integration.py`
+
+The test crosses the authenticated FastAPI service boundary through `POST /api/v1/ingest`, `GET /api/v1/documents`, `POST /api/v1/search`, `POST /api/v1/query`, and `DELETE /api/v1/documents/{doc_id}`. It uses the production upload validation/parser, SQLite metadata store, RAG service, and pinned real Qdrant `v1.15.1`; only the external Ollama inference adapter response is deterministic in CI so the release gate does not require a paid API or model download.
+
+The same executable path proves tenant B cannot list or retrieve tenant A data, a tenant-B read-only key cannot delete the tenant-A document, tenant-A deletion reconciles Qdrant vectors, and the temporary Qdrant collection is deleted during cleanup. Exact-head CI completed backend Ruff and 88 tests, frontend local-auth/OIDC tests and Next.js production build, all default/HA/security/observability/combined Compose validations, and the bounded performance job.
+
 ## Still open
 
-The following S17 items are intentionally not marked complete by this evidence:
+The following release items remain intentionally open:
 
-- representative production E2E ingestion/retrieval evidence covering the service API path;
 - final dependency/security/secrets audit evidence;
 - final operational/deployment/security documentation audit;
 - changelog/release notes and release version/tag;
