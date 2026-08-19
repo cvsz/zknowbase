@@ -91,6 +91,8 @@ services:
     build: ./backend
     command: ["python", "-m", "app.worker"]
     restart: unless-stopped
+    healthcheck:
+      disable: true
     depends_on:
       qdrant:
         condition: service_healthy
