@@ -41,6 +41,12 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _tenant_document(record: DocumentRecord | None, principal: Principal) -> DocumentRecord:
+    if record is None or record.tenant_id != principal.tenant_id:
+        raise HTTPException(404, "Document not found")
+    return record
+
+
 async def _inspect_upload(filename: str, data: bytes, settings: Settings) -> None:
     try:
         await UploadSecurity(settings).inspect(filename, data)
@@ -71,6 +77,7 @@ async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
 @write_secure.post("/ingest", response_model=IngestResponse)
 async def ingest_file(
     file: UploadFile = File(...),
+    principal: Principal = Depends(require_scopes("knowledge:write")),
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:
     data = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
@@ -84,6 +91,7 @@ async def ingest_file(
     record = DocumentRecord(
         id=doc_id,
         name=filename,
+        tenant_id=principal.tenant_id,
         source_type="file",
         content_type=file.content_type,
         status="processing",
@@ -109,6 +117,7 @@ async def ingest_file(
 @write_secure.post("/ingest/url", response_model=IngestResponse)
 async def ingest_url(
     body: UrlIngestRequest,
+    principal: Principal = Depends(require_scopes("knowledge:write")),
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:
     url = str(body.url)
@@ -117,6 +126,7 @@ async def ingest_url(
     record = DocumentRecord(
         id=doc_id,
         name=url,
+        tenant_id=principal.tenant_id,
         source_type="url",
         source_uri=url,
         status="processing",
@@ -161,23 +171,29 @@ async def preview(
 
 
 @read_secure.get("/documents", response_model=list[DocumentRecord])
-def list_documents(settings: Settings = Depends(get_settings)) -> list[DocumentRecord]:
-    return document_store(settings).list()
+def list_documents(
+    principal: Principal = Depends(require_scopes("knowledge:read")),
+    settings: Settings = Depends(get_settings),
+) -> list[DocumentRecord]:
+    return [
+        record
+        for record in document_store(settings).list()
+        if record.tenant_id == principal.tenant_id
+    ]
 
 
 @write_secure.delete("/documents/{doc_id}", status_code=204)
 async def delete_document(
     doc_id: str,
+    principal: Principal = Depends(require_scopes("knowledge:write")),
     settings: Settings = Depends(get_settings),
 ) -> None:
+    docs = document_store(settings)
+    record = _tenant_document(docs.get(doc_id), principal)
     queue = ingestion_queue(settings)
     if queue.active_for_document(doc_id):
         raise HTTPException(409, "Document has an active ingestion job")
-    docs = document_store(settings)
-    record = docs.get(doc_id)
-    if not record:
-        raise HTTPException(404, "Document not found")
-    await VectorStore(settings).delete_document(doc_id)
+    await VectorStore(settings).delete_document(principal.tenant_id, doc_id)
     if record.source_type == "file" and record.source_uri:
         Path(record.source_uri).unlink(missing_ok=True)
     docs.delete(doc_id)
@@ -186,15 +202,14 @@ async def delete_document(
 @write_secure.post("/documents/{doc_id}/reindex", response_model=IngestResponse)
 async def reindex_document(
     doc_id: str,
+    principal: Principal = Depends(require_scopes("knowledge:write")),
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:
+    docs = document_store(settings)
+    record = _tenant_document(docs.get(doc_id), principal)
     queue = ingestion_queue(settings)
     if queue.active_for_document(doc_id):
         raise HTTPException(409, "Document has an active ingestion job")
-    docs = document_store(settings)
-    record = docs.get(doc_id)
-    if not record:
-        raise HTTPException(404, "Document not found")
     try:
         if record.source_type == "url" and record.source_uri:
             text, record.content_type = await fetch_url_text(record.source_uri, settings)
@@ -218,22 +233,39 @@ async def reindex_document(
 @read_secure.post("/search", response_model=SearchResponse)
 async def search(
     body: SearchRequest,
+    principal: Principal = Depends(require_scopes("knowledge:read")),
     settings: Settings = Depends(get_settings),
 ) -> SearchResponse:
-    results = await RAGService(settings).search(body.query, body.top_k, body.filters)
+    results = await RAGService(settings).search(
+        principal.tenant_id,
+        body.query,
+        body.top_k,
+        body.filters,
+    )
     return SearchResponse(results=results)
 
 
 @read_secure.post("/query", response_model=QueryResponse)
 async def query(
     body: QueryRequest,
+    principal: Principal = Depends(require_scopes("knowledge:read")),
     settings: Settings = Depends(get_settings),
 ):
     rag = RAGService(settings)
     if not body.stream:
-        return await rag.answer(body.question, body.top_k, body.filters)
+        return await rag.answer(
+            principal.tenant_id,
+            body.question,
+            body.top_k,
+            body.filters,
+        )
 
-    sources, token_stream = await rag.answer_stream(body.question, body.top_k, body.filters)
+    sources, token_stream = await rag.answer_stream(
+        principal.tenant_id,
+        body.question,
+        body.top_k,
+        body.filters,
+    )
 
     async def events():
         yield f"event: sources\ndata: {json.dumps([s.model_dump() for s in sources])}\n\n"
@@ -255,24 +287,33 @@ def create_service_key(
     settings: Settings = Depends(get_settings),
 ) -> ServiceKeyCreateResponse:
     sec = security_store(settings)
-    record, raw_key = sec.create_key(body.name, list(body.scopes), body.expires_at)
+    record, raw_key = sec.create_key(
+        body.name,
+        list(body.scopes),
+        body.expires_at,
+        tenant_id=principal.tenant_id,
+    )
     sec.audit(
         principal.id,
         principal.key_prefix,
         "service_key.create",
         record.id,
         "success",
-        f"name={record.name};scopes={','.join(record.scopes)}",
+        f"tenant={record.tenant_id};name={record.name};scopes={','.join(record.scopes)}",
     )
     return ServiceKeyCreateResponse(key=record, secret=raw_key)
 
 
 @router.get("/service-keys", response_model=list[ServiceKeyRecord])
 def list_service_keys(
-    _principal: Principal = Depends(require_scopes("keys:admin")),
+    principal: Principal = Depends(require_scopes("keys:admin")),
     settings: Settings = Depends(get_settings),
 ) -> list[ServiceKeyRecord]:
-    return security_store(settings).list_keys()
+    return [
+        record
+        for record in security_store(settings).list_keys()
+        if principal.bootstrap or record.tenant_id == principal.tenant_id
+    ]
 
 
 @router.post("/service-keys/{key_id}/rotate", response_model=ServiceKeyCreateResponse)
@@ -282,6 +323,9 @@ def rotate_service_key(
     settings: Settings = Depends(get_settings),
 ) -> ServiceKeyCreateResponse:
     sec = security_store(settings)
+    current = sec.get_key(key_id)
+    if current is None or (not principal.bootstrap and current.tenant_id != principal.tenant_id):
+        raise HTTPException(404, "Active service key not found")
     rotated = sec.rotate(key_id)
     if rotated is None:
         raise HTTPException(404, "Active service key not found")
@@ -292,7 +336,7 @@ def rotate_service_key(
         "service_key.rotate",
         key_id,
         "success",
-        f"replacement={record.id}",
+        f"tenant={record.tenant_id};replacement={record.id}",
     )
     return ServiceKeyCreateResponse(key=record, secret=raw_key)
 
@@ -304,6 +348,9 @@ def revoke_service_key(
     settings: Settings = Depends(get_settings),
 ) -> None:
     sec = security_store(settings)
+    current = sec.get_key(key_id)
+    if current is None or (not principal.bootstrap and current.tenant_id != principal.tenant_id):
+        raise HTTPException(404, "Service key not found")
     if not sec.revoke(key_id):
         raise HTTPException(404, "Service key not found")
     sec.audit(
@@ -312,6 +359,7 @@ def revoke_service_key(
         "service_key.revoke",
         key_id,
         "success",
+        f"tenant={current.tenant_id}",
     )
 
 
