@@ -11,11 +11,11 @@ The default architecture is intentionally self-hosted:
 - Ollama embeddings + local LLM
 - local file storage
 - FastAPI backend + ingestion worker
-- Next.js Admin UI
+- Next.js Admin UI with local human login and viewer/admin RBAC
 - Docker Compose
 - in-process document security validation before parsing
 
-No managed database, Redis, Celery, hosted queue, paid malware scanner, or paid model API is required for the core platform. OpenAI, Anthropic, and Gemini remain optional adapters only.
+No managed database, hosted identity provider, Redis, Celery, hosted queue, paid malware scanner, or paid model API is required for the core platform. OpenAI, Anthropic, and Gemini remain optional adapters only.
 
 For larger self-hosted installations, local Postgres is available through the optional Compose `ha` profile; SQLite remains the single-node default. For stronger local upload scanning, ClamAV is available through the optional `security` profile.
 
@@ -36,23 +36,26 @@ For larger self-hosted installations, local Postgres is available through the op
 - grounded answers with source/chunk citations and relevance scores
 - SSE query endpoint with native Ollama/OpenAI token streaming
 - scoped, revocable, rotatable service API keys with durable security audit
+- local scrypt Admin login, signed HttpOnly sessions, viewer/admin RBAC and same-origin checks
 - Admin UI: dashboard, ingestion/chunk preview, vector management, RAG playground
-- server-side Next.js API proxy so service credentials are not exposed to browser JavaScript
+- server-side Next.js API proxy so backend service credentials are not exposed to browser JavaScript
 - Python SDK for zworkforce
 
 ## Architecture
 
 ```text
 Browser
-  -> Next.js Admin (server-side scoped key)
-      -> FastAPI /api/v1
-          -> upload security validation
-          -> SQLite default / local Postgres optional
-               -> document metadata
-               -> service keys + audit
-               -> durable ingestion jobs
-          -> Qdrant vectors
-          -> Ollama embeddings / LLM
+  -> local human login/session
+      -> Next.js Admin proxy (viewer/admin RBAC)
+          -> server-side scoped service key
+              -> FastAPI /api/v1
+                  -> upload security validation
+                  -> SQLite default / local Postgres optional
+                       -> document metadata
+                       -> service keys + audit
+                       -> durable ingestion jobs
+                  -> Qdrant vectors
+                  -> Ollama embeddings / LLM
 
 Async file ingest
   -> durable DB queue
@@ -67,13 +70,30 @@ zworkforce
       -> FastAPI /api/v1
 ```
 
-## Start locally
+## First-time local setup
+
+There are **no default Admin UI credentials**. Create local auth configuration before the first Compose startup.
 
 ```bash
 cp .env.example .env
-# Replace bootstrap and frontend key placeholders before production use.
+
+# Generate a scrypt admin hash without placing the password in argv/shell history.
+cd frontend
+read -rsp "Admin password: " PASS
+printf '%s' "$PASS" | node scripts/hash-password.mjs admin admin >> ../.env
+unset PASS
+cd ..
+
+# Generate the HMAC signing secret for HttpOnly Admin sessions.
+printf '\nZKB_ADMIN_SESSION_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
+
+# Replace ZKB_API_KEY and ZKB_FRONTEND_API_KEY placeholders as documented below.
 docker compose up --build
 ```
+
+The generated `ZKB_ADMIN_USERS_JSON` line is single-quoted so the `$` separators in the scrypt hash remain literal when Docker Compose reads `.env`. Add a read-only human account by generating another entry with role `viewer` and combining the user objects into the same JSON array.
+
+`ZKB_ADMIN_COOKIE_SECURE=false` is intentional for local `http://localhost`. Set it to `true` only when the Admin UI is behind HTTPS; otherwise a Secure cookie will not be sent by the browser over local HTTP.
 
 The default command starts Qdrant, Ollama, backend, the local ingestion worker, and frontend. First boot pulls `nomic-embed-text` and `qwen2.5:3b` into Ollama. After images/models are present, the default runtime can operate locally without paid APIs.
 
@@ -81,6 +101,17 @@ The default command starts Qdrant, Ollama, backend, the local ingestion worker, 
 - API: `http://localhost:8000`
 - OpenAPI: `http://localhost:8000/docs`
 - Qdrant: `http://localhost:6333`
+
+### Admin roles
+
+The browser never receives `ZKB_FRONTEND_API_KEY`. A signed human session must pass server-side authorization before the Next.js proxy injects that credential.
+
+| Role | Admin proxy capability |
+|---|---|
+| `viewer` | health, document/job reads, RAG `search` and `query` |
+| `admin` | viewer capabilities plus ingestion, reindex/delete and other mutations |
+
+Viewer sessions are explicitly denied service-key and audit administration through the Admin proxy. Local user removal or a role change invalidates existing sessions on their next request. Sessions expire after eight hours.
 
 ### Optional local Postgres profile
 
@@ -118,7 +149,7 @@ docker compose --profile ha --profile security up --build
 
 ## API scopes
 
-`GET /api/v1/health` is unauthenticated. Other endpoints require `X-API-Key` and the corresponding scope.
+`GET /api/v1/health` is unauthenticated. Other endpoints require `X-API-Key` and the corresponding service-key scope.
 
 | Scope | Endpoints |
 |---|---|
@@ -258,23 +289,24 @@ Leaving cloud keys empty keeps the platform on the local path.
 
 ## Security and reliability notes
 
-- Production startup rejects the default bootstrap key while bootstrap authentication is enabled.
+- Production startup rejects the default bootstrap service key while bootstrap authentication is enabled.
+- The Admin UI has no default human password; local users are scrypt-hashed and human sessions are separated from backend service credentials.
+- Signed Admin sessions are HttpOnly/SameSite=Strict, role checked server-side, and same-origin checks are required for state-changing proxy calls.
 - Generated service keys are high-entropy bearer tokens; plaintext is returned once and never persisted.
-- Scopes are enforced server-side and denied attempts are audited.
+- Service-key scopes are enforced server-side and denied attempts are audited.
 - File uploads are structurally validated before any parser receives their bytes; ClamAV scanning can be enabled locally without a hosted security service.
 - SQLite uses WAL/busy-timeout for backend + worker concurrency; Postgres is preferred before horizontally scaling many local processes.
 - Queue completion/failure requires current worker ownership; stale workers cannot overwrite reclaimed jobs.
 - Async uploads reject unsupported file suffixes before entering the retry queue.
 - URL ingestion permits public HTTP(S), rejects non-global DNS resolutions and redirects, and bounds response size. High-assurance deployments should additionally constrain egress at the network layer.
 - Do not expose Qdrant, Ollama, or clamd directly to untrusted networks.
-- Human Admin identity still requires the local/OIDC RBAC hardening slice; service keys are the service-to-service boundary.
 
 ## Validation
 
 GitHub Actions validates:
 
-- backend: dependency install, Ruff, pytest, upload-security tests, and real local Postgres integration tests
-- frontend: Next.js production build
+- backend: dependency install, Ruff, pytest, upload-security tests, queue tests and real local Postgres integration tests
+- frontend: Node local-auth regression tests and Next.js production build
 - compose: default SQLite stack plus `ha`, `security`, and combined local profiles
 
 See [`exec-planning.md`](./exec-planning.md) for the remaining local-first production hardening work.

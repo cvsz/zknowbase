@@ -36,7 +36,6 @@ services:
     command: ["ollama pull nomic-embed-text && ollama pull qwen2.5:3b"]
     restart: "no"
 
-  # Optional local HA metadata profile. SQLite remains the zero-cost default.
   postgres:
     image: postgres:17-alpine
     profiles: ["ha"]
@@ -53,8 +52,6 @@ services:
       timeout: 5s
       retries: 20
 
-  # Optional zero-license-cost malware scanner. Port 3310 stays internal to the
-  # Compose network because clamd TCP has no transport authentication.
   clamav:
     image: clamav/clamav:1.4.5
     profiles: ["security"]
@@ -145,6 +142,9 @@ services:
     environment:
       ZKB_BACKEND_URL: http://backend:8000
       ZKB_API_KEY: ${ZKB_FRONTEND_API_KEY:?Set ZKB_FRONTEND_API_KEY in .env}
+      ZKB_ADMIN_USERS_JSON: ${ZKB_ADMIN_USERS_JSON:?Generate local admin users before startup}
+      ZKB_ADMIN_SESSION_SECRET: ${ZKB_ADMIN_SESSION_SECRET:?Set a random 32+ character admin session secret}
+      ZKB_ADMIN_COOKIE_SECURE: ${ZKB_ADMIN_COOKIE_SECURE:-false}
     ports:
       - "3000:3000"
 

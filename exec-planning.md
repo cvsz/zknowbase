@@ -11,6 +11,7 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 5. Optional Postgres must run locally/self-hosted; SQLite remains the default for a single-node deployment.
 6. Background ingestion must not require Redis, Celery, or an external broker.
 7. Upload security must be available locally without a paid malware-scanning API.
+8. Admin human authentication must work locally without a hosted identity provider.
 
 ## Architecture principles
 1. API-first boundary: zworkforce never reaches the vector DB directly.
@@ -24,6 +25,7 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 9. Least privilege: generated service keys are scoped, revocable/rotatable, and never persisted in plaintext.
 10. Durable local work: ingestion jobs use the metadata DB for leases/retries instead of a paid/external queue.
 11. Parse only after upload security validation; local ClamAV mode fails closed when selected.
+12. Human Admin sessions and backend service credentials are separate trust boundaries.
 
 ## Delivery slices
 
@@ -103,12 +105,25 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] sync ingest, preview, reindex, and async worker scan before parser execution
 - [x] scanner/PDF active-content regression tests
 
+### S10 — Local Admin human authentication and RBAC
+- [x] no default human credentials
+- [x] local scrypt password hashes generated without passing password in argv
+- [x] signed 8-hour HttpOnly/SameSite=Strict sessions
+- [x] local HTTP supported; Secure cookie is explicit for HTTPS deployments
+- [x] session invalidates when the configured user is removed or its role changes
+- [x] bounded in-process login attempt limiter for the default single frontend process
+- [x] same-origin enforcement for login/logout and state-changing Admin proxy calls
+- [x] `viewer` retrieval-only and `admin` mutation authorization at the server proxy
+- [x] service key remains server-side and is injected only after human session authorization
+- [x] Node auth regression tests run in CI without extra runtime dependencies
+
 ## Production hardening backlog
 - [x] Replace single API key with scoped service keys + rotation/audit table.
 - [x] Optional local Postgres metadata backend for HA/multi-replica deployments.
 - [x] Queue-backed asynchronous ingestion for large corpora without an external broker.
 - [x] Malware scanning / active-content rejection before parsing untrusted uploads using self-hosted tools.
-- [ ] Local/OIDC-compatible RBAC for Admin UI without mandatory SaaS identity dependency.
+- [x] Local Admin UI human authentication + viewer/admin RBAC without mandatory SaaS identity.
+- [ ] Optional OIDC login adapter for self-hosted identity providers.
 - [ ] Hybrid BM25+dense retrieval + local reranker.
 - [ ] Per-tenant collections and encryption policy.
 - [ ] OpenTelemetry traces/metrics and local SLO dashboards.
@@ -118,16 +133,19 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 ## Acceptance gates
 - `pytest` backend tests green.
 - Python syntax/import validation green.
-- Frontend `npm run build` green.
+- Frontend local-auth tests and `npm run build` green.
 - Docker Compose default, `ha`, `security`, and combined local profiles validate.
 - Postgres integration tests run against an actual local Postgres service in CI.
 - Durable queue tests prove FIFO claim, worker ownership, retries, cancel, and completion.
 - PDF active content and embedded files are rejected before text extraction.
 - ClamAV mode fails closed and uses only the internal Compose network.
+- Admin proxy requires a valid human session before injecting its service credential.
+- Viewer sessions cannot perform mutation or key/audit administration through the proxy.
+- No default local-admin password or committed session secret.
 - No secrets committed.
-- Missing/invalid/revoked/expired keys fail closed.
+- Missing/invalid/revoked/expired service keys fail closed.
 - Read-only service keys cannot mutate documents.
 - Service-key plaintext is never persisted and rotation revokes the old key atomically.
 - Query citations contain document/chunk identity.
 - Delete removes both metadata and vectors.
-- Default runtime requires no paid API, managed service, or external queue.
+- Default runtime requires no paid API, managed service, hosted identity, or external queue.
