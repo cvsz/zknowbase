@@ -13,7 +13,13 @@ def tenant_queue(tmp_path) -> TenantIngestionQueue:
 
 def test_queue_tenant_binding_survives_retry(tmp_path):
     queue = tenant_queue(tmp_path)
-    job = queue.enqueue("beta", "doc-1", "url", "https://example.com", 2)
+    job = queue.enqueue(
+        "doc-1",
+        "url",
+        "https://example.com",
+        2,
+        tenant_id="beta",
+    )
     assert job.tenant_id == "beta"
 
     claimed = queue.claim_next("worker-1", 60)
@@ -29,7 +35,13 @@ def test_queue_tenant_binding_survives_retry(tmp_path):
 
 def test_queue_tenant_scope_hides_and_blocks_foreign_job(tmp_path):
     queue = tenant_queue(tmp_path)
-    job = queue.enqueue("beta", "doc-1", "url", "https://example.com", 3)
+    job = queue.enqueue(
+        "doc-1",
+        "url",
+        "https://example.com",
+        3,
+        tenant_id="beta",
+    )
 
     assert queue.get(job.id, "default") is None
     assert queue.list(100, "default") == []
