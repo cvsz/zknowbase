@@ -126,6 +126,7 @@ class AuditRecord(BaseModel):
 class IngestionJobRecord(BaseModel):
     id: str
     document_id: str
+    tenant_id: str = Field(default="default", min_length=1, max_length=63, pattern=TENANT_ID_PATTERN)
     source_type: Literal["file", "url"]
     source_uri: str
     status: IngestionJobStatus
