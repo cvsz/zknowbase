@@ -53,9 +53,12 @@ def test_scoped_service_key_enforces_read_write_boundary(monkeypatch, tmp_path):
     headers = {"X-API-Key": raw_key}
     assert client.get("/read", headers=headers).status_code == 200
     assert client.post("/write", headers=headers).status_code == 403
-    whoami = client.get("/whoami", headers=headers)
-    assert whoami.status_code == 200
-    assert whoami.json() == {"tenant_id": "default", "principal_id": service_key.id}
+    identity_response = client.get("/whoami", headers=headers)
+    assert identity_response.status_code == 200
+    assert identity_response.json() == {
+        "tenant_id": "default",
+        "principal_id": service_key.id,
+    }
 
     bootstrap = {"X-API-Key": "this-is-a-test-secret-key"}
     assert client.post("/write", headers=bootstrap).status_code == 200
