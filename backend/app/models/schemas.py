@@ -82,6 +82,7 @@ class HealthResponse(BaseModel):
     status: str
     qdrant: str
     metadata_store: str
+    scanner: str = "validation-only"
 
 
 class ServiceKeyCreateRequest(BaseModel):
