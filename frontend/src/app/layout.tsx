@@ -11,11 +11,7 @@ export const metadata: Metadata = {
 };
 export const dynamic = "force-dynamic";
 
-export default async function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
   let session = null;
   try {
     const cookieStore = await cookies();
@@ -25,10 +21,11 @@ export default async function RootLayout({
   }
 
   if (!session) {
+    const oidcEnabled = Boolean((process.env.ZKB_OIDC_ISSUER ?? "").trim());
     return (
       <html lang="en">
         <body>
-          <LoginGate />
+          <LoginGate oidcEnabled={oidcEnabled} />
         </body>
       </html>
     );
