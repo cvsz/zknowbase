@@ -17,7 +17,11 @@ class Settings(BaseSettings):
 
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "zknowbase"
+    metadata_backend: Literal["sqlite", "postgres"] = "sqlite"
     metadata_db: Path = Path("data/zknowbase.db")
+    postgres_url: str | None = None
+    postgres_pool_min_size: int = Field(default=1, ge=1, le=50)
+    postgres_pool_max_size: int = Field(default=10, ge=1, le=100)
     upload_dir: Path = Path("data/uploads")
     max_upload_mb: int = 25
     max_url_bytes: int = 5_000_000
@@ -38,17 +42,22 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = 90.0
 
     @model_validator(mode="after")
-    def validate_production_secret(self) -> "Settings":
+    def validate_runtime_configuration(self) -> "Settings":
         if (
             self.environment.lower() == "production"
             and self.bootstrap_api_key_enabled
             and self.api_key == "change-me-long-random-secret"
         ):
             raise ValueError("ZKB_API_KEY must be replaced before production startup")
+        if self.metadata_backend == "postgres" and not self.postgres_url:
+            raise ValueError("ZKB_POSTGRES_URL is required when ZKB_METADATA_BACKEND=postgres")
+        if self.postgres_pool_max_size < self.postgres_pool_min_size:
+            raise ValueError("ZKB_POSTGRES_POOL_MAX_SIZE must be >= ZKB_POSTGRES_POOL_MIN_SIZE")
         return self
 
     def ensure_paths(self) -> None:
-        self.metadata_db.parent.mkdir(parents=True, exist_ok=True)
+        if self.metadata_backend == "sqlite":
+            self.metadata_db.parent.mkdir(parents=True, exist_ok=True)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
 
 
