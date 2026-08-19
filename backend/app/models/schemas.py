@@ -1,0 +1,75 @@
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field, HttpUrl
+
+
+class DocumentRecord(BaseModel):
+    id: str
+    name: str
+    source_type: str
+    source_uri: str | None = None
+    content_type: str | None = None
+    status: str
+    chunk_count: int = 0
+    size_bytes: int = 0
+    created_at: datetime
+    updated_at: datetime
+    error: str | None = None
+
+
+class IngestResponse(BaseModel):
+    document: DocumentRecord
+
+
+class UrlIngestRequest(BaseModel):
+    url: HttpUrl
+
+
+class ChunkPreview(BaseModel):
+    index: int
+    text: str
+    characters: int
+
+
+class PreviewResponse(BaseModel):
+    chunks: list[ChunkPreview]
+    total_chunks: int
+
+
+class QueryRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=20_000)
+    top_k: int = Field(default=5, ge=1, le=20)
+    stream: bool = False
+    filters: dict[str, Any] | None = None
+
+
+class SearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=20_000)
+    top_k: int = Field(default=5, ge=1, le=50)
+    filters: dict[str, Any] | None = None
+
+
+class SourceCitation(BaseModel):
+    document_id: str
+    document_name: str
+    chunk_id: str
+    chunk_index: int
+    score: float
+    text: str
+    source_uri: str | None = None
+
+
+class SearchResponse(BaseModel):
+    results: list[SourceCitation]
+
+
+class QueryResponse(BaseModel):
+    answer: str
+    sources: list[SourceCitation]
+
+
+class HealthResponse(BaseModel):
+    status: str
+    qdrant: str
+    metadata_store: str
