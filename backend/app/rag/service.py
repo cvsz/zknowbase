@@ -18,12 +18,18 @@ class RAGService:
         self.providers = AIProviders(settings)
         self.vectors = VectorStore(settings)
 
-    async def search(self, query: str, top_k: int, filters: dict | None = None) -> list[SourceCitation]:
+    async def search(
+        self,
+        tenant_id: str,
+        query: str,
+        top_k: int,
+        filters: dict | None = None,
+    ) -> list[SourceCitation]:
         query_vector = (await self.providers.embed([query]))[0]
         if self.settings.retrieval_mode == "dense":
-            return await self.vectors.search(query_vector, top_k, filters)
+            return await self.vectors.search(tenant_id, query_vector, top_k, filters)
         candidate_limit = max(top_k, min(100, top_k * self.settings.hybrid_candidate_multiplier))
-        candidates = await self.vectors.search(query_vector, candidate_limit, filters)
+        candidates = await self.vectors.search(tenant_id, query_vector, candidate_limit, filters)
         return rerank_hybrid(
             query,
             candidates,
@@ -39,11 +45,23 @@ class RAGService:
         )
         return f"Context:\n{context or '(no relevant context found)'}\n\nQuestion: {question}\nAnswer:"
 
-    async def answer(self, question: str, top_k: int, filters: dict | None = None) -> QueryResponse:
-        sources = await self.search(question, top_k, filters)
+    async def answer(
+        self,
+        tenant_id: str,
+        question: str,
+        top_k: int,
+        filters: dict | None = None,
+    ) -> QueryResponse:
+        sources = await self.search(tenant_id, question, top_k, filters)
         answer = await self.providers.complete(SYSTEM_PROMPT, self._prompt(question, sources))
         return QueryResponse(answer=answer, sources=sources)
 
-    async def answer_stream(self, question: str, top_k: int, filters: dict | None = None) -> tuple[list[SourceCitation], AsyncIterator[str]]:
-        sources = await self.search(question, top_k, filters)
+    async def answer_stream(
+        self,
+        tenant_id: str,
+        question: str,
+        top_k: int,
+        filters: dict | None = None,
+    ) -> tuple[list[SourceCitation], AsyncIterator[str]]:
+        sources = await self.search(tenant_id, question, top_k, filters)
         return sources, self.providers.stream(SYSTEM_PROMPT, self._prompt(question, sources))
