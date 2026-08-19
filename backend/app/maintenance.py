@@ -20,7 +20,7 @@ def mutation_lock(path: Path, *, exclusive: bool) -> Iterator[None]:
 
 @asynccontextmanager
 async def async_mutation_lock(path: Path, *, exclusive: bool) -> AsyncIterator[None]:
-    """Async-friendly variant so an exclusive backup lock doesn't block FastAPI's loop."""
+    """Async-friendly variant so an exclusive backup/restore lock doesn't block the event loop."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+b")
@@ -33,8 +33,8 @@ async def async_mutation_lock(path: Path, *, exclusive: bool) -> AsyncIterator[N
         handle.close()
 
 
-def is_mutating_api_request(method: str, path: str) -> bool:
-    if not path.startswith("/api/v1/") or method in {"GET", "HEAD", "OPTIONS"}:
-        return False
-    # Query/search are POST for payload ergonomics but are read-only operations.
-    return path not in {"/api/v1/query", "/api/v1/search"}
+def requires_data_lock(path: str) -> bool:
+    # Health remains available to local orchestration while backup/restore owns
+    # the exclusive data lock. Every endpoint that can observe or change KB data
+    # takes a shared lock so restore never exposes a half-restored state.
+    return path.startswith("/api/v1/") and path != "/api/v1/health"
