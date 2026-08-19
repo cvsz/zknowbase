@@ -14,6 +14,7 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 class Principal:
     id: str
     name: str
+    tenant_id: str
     key_prefix: str
     scopes: frozenset[str]
     bootstrap: bool = False
@@ -41,6 +42,7 @@ def authenticate_principal(
         principal = Principal(
             id="bootstrap",
             name="bootstrap",
+            tenant_id=settings.default_tenant_id,
             key_prefix="bootstrap",
             scopes=frozenset({"*"}),
             bootstrap=True,
@@ -66,6 +68,7 @@ def authenticate_principal(
     principal = Principal(
         id=key.id,
         name=key.name,
+        tenant_id=key.tenant_id,
         key_prefix=key.key_prefix,
         scopes=frozenset(key.scopes),
     )
@@ -87,7 +90,7 @@ def require_scopes(*required: str):
                 "authorize",
                 f"{request.method} {request.url.path}",
                 "denied",
-                f"missing scopes: {','.join(missing)}",
+                f"tenant={principal.tenant_id};missing scopes:{','.join(missing)}",
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
