@@ -131,5 +131,6 @@ jobs:
       - run: docker compose --profile ha config --quiet
       - run: docker compose --profile security config --quiet
       - run: docker compose --profile observability config --quiet
+      - run: docker compose --profile ops config --quiet
       - run: docker compose --profile ha --profile security config --quiet
-      - run: docker compose --profile ha --profile security --profile observability config --quiet
+      - run: docker compose --profile ha --profile security --profile observability --profile ops config --quiet
