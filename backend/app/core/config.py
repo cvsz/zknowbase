@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 150
 
+    malware_scan_mode: Literal["validate", "clamav"] = "validate"
+    clamav_host: str = "clamav"
+    clamav_port: int = Field(default=3310, ge=1, le=65535)
+    clamav_timeout_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
+
     worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=60.0)
     worker_lease_seconds: int = Field(default=300, ge=30, le=3600)
     ingestion_job_max_attempts: int = Field(default=3, ge=1, le=10)

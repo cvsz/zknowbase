@@ -53,6 +53,15 @@ services:
       timeout: 5s
       retries: 20
 
+  # Optional zero-license-cost malware scanner. Port 3310 stays internal to the
+  # Compose network because clamd TCP has no transport authentication.
+  clamav:
+    image: clamav/clamav:1.4.5
+    profiles: ["security"]
+    restart: unless-stopped
+    volumes:
+      - clamav_data:/var/lib/clamav
+
   backend:
     build: ./backend
     restart: unless-stopped
@@ -73,6 +82,10 @@ services:
       ZKB_POSTGRES_POOL_MIN_SIZE: ${ZKB_POSTGRES_POOL_MIN_SIZE:-1}
       ZKB_POSTGRES_POOL_MAX_SIZE: ${ZKB_POSTGRES_POOL_MAX_SIZE:-10}
       ZKB_UPLOAD_DIR: /data/uploads
+      ZKB_MALWARE_SCAN_MODE: ${ZKB_MALWARE_SCAN_MODE:-validate}
+      ZKB_CLAMAV_HOST: ${ZKB_CLAMAV_HOST:-clamav}
+      ZKB_CLAMAV_PORT: ${ZKB_CLAMAV_PORT:-3310}
+      ZKB_CLAMAV_TIMEOUT_SECONDS: ${ZKB_CLAMAV_TIMEOUT_SECONDS:-30}
       ZKB_EMBEDDING_PROVIDER: ${ZKB_EMBEDDING_PROVIDER:-ollama}
       ZKB_EMBEDDING_MODEL: ${ZKB_EMBEDDING_MODEL:-nomic-embed-text}
       ZKB_LLM_PROVIDER: ${ZKB_LLM_PROVIDER:-ollama}
@@ -108,6 +121,10 @@ services:
       ZKB_POSTGRES_POOL_MIN_SIZE: ${ZKB_POSTGRES_POOL_MIN_SIZE:-1}
       ZKB_POSTGRES_POOL_MAX_SIZE: ${ZKB_POSTGRES_POOL_MAX_SIZE:-10}
       ZKB_UPLOAD_DIR: /data/uploads
+      ZKB_MALWARE_SCAN_MODE: ${ZKB_MALWARE_SCAN_MODE:-validate}
+      ZKB_CLAMAV_HOST: ${ZKB_CLAMAV_HOST:-clamav}
+      ZKB_CLAMAV_PORT: ${ZKB_CLAMAV_PORT:-3310}
+      ZKB_CLAMAV_TIMEOUT_SECONDS: ${ZKB_CLAMAV_TIMEOUT_SECONDS:-30}
       ZKB_EMBEDDING_PROVIDER: ${ZKB_EMBEDDING_PROVIDER:-ollama}
       ZKB_EMBEDDING_MODEL: ${ZKB_EMBEDDING_MODEL:-nomic-embed-text}
       ZKB_OLLAMA_BASE_URL: http://ollama:11434
@@ -136,3 +153,4 @@ volumes:
   ollama_data:
   backend_data:
   postgres_data:
+  clamav_data:

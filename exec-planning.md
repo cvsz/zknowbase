@@ -10,6 +10,7 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 4. Cloud model providers remain optional adapters only and are never required for core functionality.
 5. Optional Postgres must run locally/self-hosted; SQLite remains the default for a single-node deployment.
 6. Background ingestion must not require Redis, Celery, or an external broker.
+7. Upload security must be available locally without a paid malware-scanning API.
 
 ## Architecture principles
 1. API-first boundary: zworkforce never reaches the vector DB directly.
@@ -22,6 +23,7 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 8. Idempotent lifecycle: deleting/reindexing a document also reconciles vectors.
 9. Least privilege: generated service keys are scoped, revocable/rotatable, and never persisted in plaintext.
 10. Durable local work: ingestion jobs use the metadata DB for leases/retries instead of a paid/external queue.
+11. Parse only after upload security validation; local ClamAV mode fails closed when selected.
 
 ## Delivery slices
 
@@ -89,11 +91,23 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] job list/status/cancel APIs
 - [x] worker and queue unit/integration coverage
 
+### S9 — Local upload security / content disarm boundary
+- [x] extension + empty-file + text-NUL validation before parsing
+- [x] PDF magic/structure validation
+- [x] reject PDF JavaScript, launch actions, embedded files, XFA, rich-media/active annotations
+- [x] optional local ClamAV `INSTREAM` client
+- [x] ClamAV mode fails closed on timeout/unavailability/unexpected scanner response
+- [x] optional Compose `security` profile using pinned ClamAV LTS patch release
+- [x] ClamAV TCP port remains internal to the Compose network
+- [x] scanner readiness included in health response
+- [x] sync ingest, preview, reindex, and async worker scan before parser execution
+- [x] scanner/PDF active-content regression tests
+
 ## Production hardening backlog
 - [x] Replace single API key with scoped service keys + rotation/audit table.
 - [x] Optional local Postgres metadata backend for HA/multi-replica deployments.
 - [x] Queue-backed asynchronous ingestion for large corpora without an external broker.
-- [ ] Malware scanning / CDR before parsing untrusted uploads using self-hosted tools.
+- [x] Malware scanning / active-content rejection before parsing untrusted uploads using self-hosted tools.
 - [ ] Local/OIDC-compatible RBAC for Admin UI without mandatory SaaS identity dependency.
 - [ ] Hybrid BM25+dense retrieval + local reranker.
 - [ ] Per-tenant collections and encryption policy.
@@ -105,9 +119,11 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - `pytest` backend tests green.
 - Python syntax/import validation green.
 - Frontend `npm run build` green.
-- Docker Compose default and optional `ha` profile validate.
+- Docker Compose default, `ha`, `security`, and combined local profiles validate.
 - Postgres integration tests run against an actual local Postgres service in CI.
 - Durable queue tests prove FIFO claim, worker ownership, retries, cancel, and completion.
+- PDF active content and embedded files are rejected before text extraction.
+- ClamAV mode fails closed and uses only the internal Compose network.
 - No secrets committed.
 - Missing/invalid/revoked/expired keys fail closed.
 - Read-only service keys cannot mutate documents.

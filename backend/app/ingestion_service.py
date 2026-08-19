@@ -7,6 +7,7 @@ from app.rag.loaders import fetch_url_text, parse_bytes
 from app.rag.providers import AIProviders
 from app.rag.vector_store import VectorStore
 from app.store_factory import document_store
+from app.upload_security import UploadSecurity
 
 
 async def index_document(
@@ -58,6 +59,7 @@ async def process_ingestion_job(
         if not path.is_file():
             raise ValueError("Queued document source file is unavailable")
         data = path.read_bytes()
+        await UploadSecurity(settings).inspect(path.name, data)
         text = parse_bytes(path.name, data)
         record.size_bytes = len(data)
     else:

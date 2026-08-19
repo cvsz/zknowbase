@@ -30,6 +30,7 @@ from app.rag.loaders import fetch_url_text, parse_bytes
 from app.rag.service import RAGService
 from app.rag.vector_store import VectorStore
 from app.store_factory import document_store, ingestion_queue, security_store
+from app.upload_security import UploadSecurity, UploadSecurityError
 
 router = APIRouter()
 read_secure = APIRouter(dependencies=[Depends(require_scopes("knowledge:read"))])
@@ -40,9 +41,17 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+async def _inspect_upload(filename: str, data: bytes, settings: Settings) -> None:
+    try:
+        await UploadSecurity(settings).inspect(filename, data)
+    except UploadSecurityError as exc:
+        raise HTTPException(422, f"Upload rejected: {exc}") from exc
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
     qdrant_ok = await VectorStore(settings).healthy()
+    scanner = await UploadSecurity(settings).scanner_status()
     try:
         document_store(settings).list()
         security_store(settings).list_keys()
@@ -50,10 +59,12 @@ async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
         db = "ok"
     except Exception:
         db = "error"
+    scanner_ok = scanner in {"ok", "validation-only"}
     return HealthResponse(
-        status="ok" if qdrant_ok and db == "ok" else "degraded",
+        status="ok" if qdrant_ok and db == "ok" and scanner_ok else "degraded",
         qdrant="ok" if qdrant_ok else "error",
         metadata_store=db,
+        scanner=scanner,
     )
 
 
@@ -66,6 +77,8 @@ async def ingest_file(
     if len(data) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, "File exceeds upload limit")
     filename = Path(file.filename or "upload").name
+    await _inspect_upload(filename, data, settings)
+
     doc_id = str(uuid4())
     now = utcnow()
     record = DocumentRecord(
@@ -132,8 +145,10 @@ async def preview(
     data = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
     if len(data) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, "File exceeds upload limit")
+    filename = Path(file.filename or "upload").name
+    await _inspect_upload(filename, data, settings)
     try:
-        chunks = split_text(parse_bytes(Path(file.filename or "upload").name, data), settings)
+        chunks = split_text(parse_bytes(filename, data), settings)
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
     return PreviewResponse(
@@ -185,7 +200,9 @@ async def reindex_document(
             text, record.content_type = await fetch_url_text(record.source_uri, settings)
         elif record.source_uri:
             path = Path(record.source_uri)
-            text = parse_bytes(path.name, path.read_bytes())
+            data = path.read_bytes()
+            await _inspect_upload(path.name, data, settings)
+            text = parse_bytes(path.name, data)
         else:
             raise ValueError("Document source is unavailable")
         record.status, record.updated_at = "processing", utcnow()
