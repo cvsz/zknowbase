@@ -66,7 +66,7 @@ function validateScryptHash(encoded: string): void {
   const n = Number(parts[2]);
   const r = Number(parts[3]);
   const p = Number(parts[4]);
-  if (!Number.isInteger(n) || n < 16_384 || n > 1_048_576 || (n & (n - 1)) !== 0) {
+  if (!Number.isInteger(n) || n < 16_384 || n > 262_144 || (n & (n - 1)) !== 0) {
     throw new Error("Invalid scrypt N parameter");
   }
   if (!Number.isInteger(r) || r < 1 || r > 32 || !Number.isInteger(p) || p < 1 || p > 16) {
@@ -94,8 +94,11 @@ export function authenticateLocalUser(username: string, password: string): { use
   if (!USERNAME_RE.test(username) || password.length < 1 || password.length > 4096) return null;
   const users = parseLocalUsers();
   const user = users.find((candidate) => candidate.username.toLowerCase() === username.toLowerCase());
-  if (!user) return null;
-  if (!verifyScryptPassword(password, user.password_hash)) return null;
+  // Run scrypt even for an unknown username so the common failure paths have
+  // comparable computational cost and reveal less through response timing.
+  const comparisonHash = user?.password_hash ?? users[0].password_hash;
+  const valid = verifyScryptPassword(password, comparisonHash);
+  if (!user || !valid) return null;
   return { username: user.username, role: user.role };
 }
 
@@ -117,12 +120,7 @@ export function verifyAdminSession(token: string | undefined, nowSeconds = Math.
   const [body, signature, extra] = token.split(".");
   if (!body || !signature || extra) return null;
   const expected = createHmac("sha256", sessionSecret()).update(body).digest();
-  let supplied: Buffer;
-  try {
-    supplied = Buffer.from(signature, "base64url");
-  } catch {
-    return null;
-  }
+  const supplied = Buffer.from(signature, "base64url");
   if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return null;
   let payload: unknown;
   try {
@@ -143,7 +141,20 @@ export function verifyAdminSession(token: string | undefined, nowSeconds = Math.
     value.exp <= nowSeconds ||
     value.exp - value.iat > SESSION_TTL_SECONDS
   ) return null;
-  return value as AdminSession;
+
+  // Local config is the current authorization authority. Removing a user or
+  // changing its role revokes an otherwise cryptographically valid session.
+  const configured = parseLocalUsers().find(
+    (user) => user.username.toLowerCase() === value.sub.toLowerCase(),
+  );
+  if (!configured || configured.role !== value.role) return null;
+  return {
+    v: 1,
+    sub: value.sub,
+    role: value.role,
+    iat: value.iat,
+    exp: value.exp,
+  };
 }
 
 export function cookieSecure(): boolean {
