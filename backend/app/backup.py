@@ -31,6 +31,7 @@ POSTGRES_REQUIRED_TABLES = (
 POSTGRES_TENANT_MAPPING_TABLES = (
     "service_key_tenants",
     "ingestion_job_tenants",
+    "security_audit_tenants",
 )
 POSTGRES_TABLES = POSTGRES_REQUIRED_TABLES + POSTGRES_TENANT_MAPPING_TABLES
 
@@ -156,7 +157,7 @@ def _restore_postgres(settings: Settings, source_path: Path) -> None:
     with psycopg.connect(settings.postgres_url, row_factory=dict_row) as conn:
         with conn.transaction():
             conn.execute(
-                "TRUNCATE ingestion_job_tenants, service_key_tenants, "
+                "TRUNCATE security_audit_tenants, ingestion_job_tenants, service_key_tenants, "
                 "ingestion_jobs, security_audit, service_keys, documents"
             )
             for table in POSTGRES_TABLES:
@@ -164,7 +165,8 @@ def _restore_postgres(settings: Settings, source_path: Path) -> None:
                 if rows is None and table in POSTGRES_TENANT_MAPPING_TABLES:
                     # Backward compatibility for pre-tenant FORMAT_VERSION=1 archives.
                     # Tenant wrappers deterministically remap restored legacy keys/jobs
-                    # to ZKB_DEFAULT_TENANT_ID when they are first observed.
+                    # to ZKB_DEFAULT_TENANT_ID when they are first observed. Legacy
+                    # audit ownership falls back to the restored key tenant mapping.
                     continue
                 if not isinstance(rows, list):
                     raise BackupError(f"Missing Postgres table backup: {table}")
