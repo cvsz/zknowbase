@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from app.core.config import get_settings
 from app.ingestion_service import process_ingestion_job
+from app.maintenance import async_mutation_lock
 from app.store_factory import document_store, ingestion_queue
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -80,9 +81,6 @@ async def _run_job(queue, job, worker_id: str, settings) -> None:
             with suppress(asyncio.CancelledError):
                 await processing
 
-        # Only the current lease owner may transition the job and reconcile the
-        # document. A stale worker must not overwrite state after another worker
-        # has reclaimed the job.
         transitioned = False
         with suppress(Exception):
             transitioned = queue.fail(job.id, worker_id, str(exc))
@@ -113,19 +111,22 @@ async def run_worker() -> None:
         settings.metadata_backend,
     )
     while True:
-        _reap_and_reconcile(queue, settings)
-        job = queue.claim_next(worker_id, settings.worker_lease_seconds)
-        if job is None:
-            await asyncio.sleep(settings.worker_poll_seconds)
-            continue
-        logger.info(
-            "ingestion_claimed job_id=%s document_id=%s attempt=%s/%s",
-            job.id,
-            job.document_id,
-            job.attempts,
-            job.max_attempts,
-        )
-        await _run_job(queue, job, worker_id, settings)
+        # Hold a shared lock from queue mutation through indexing completion.
+        # Backup/restore takes the exclusive form of this same filesystem lock.
+        async with async_mutation_lock(settings.maintenance_lock_path, exclusive=False):
+            _reap_and_reconcile(queue, settings)
+            job = queue.claim_next(worker_id, settings.worker_lease_seconds)
+            if job is not None:
+                logger.info(
+                    "ingestion_claimed job_id=%s document_id=%s attempt=%s/%s",
+                    job.id,
+                    job.document_id,
+                    job.attempts,
+                    job.max_attempts,
+                )
+                await _run_job(queue, job, worker_id, settings)
+                continue
+        await asyncio.sleep(settings.worker_poll_seconds)
 
 
 def main() -> None:
