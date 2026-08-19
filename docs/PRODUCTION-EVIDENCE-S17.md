@@ -30,12 +30,45 @@ The same run also completed backend lint/tests, frontend auth tests and producti
 
 This benchmark is a repeatable component regression guardrail. It is not represented as a universal end-to-end `/query` latency guarantee because Ollama model latency and deployment hardware remain workload-specific.
 
+## Representative production service-API E2E
+
+- Pull request: #39, `test: add representative production API E2E evidence`
+- Exact final PR head: `ec993e88f30604372d7f2a06e01a6458ac42eba8`
+- Merge commit: `2bbae7638d41ce17d559e148d5763cc6df568f5e`
+- CI run: `32245742977`, conclusion `success`
+- Executable evidence: `backend/tests/test_production_e2e_integration.py`
+
+The test crosses the authenticated FastAPI service boundary through ingest, document listing, search, grounded query, and delete. It uses the production upload validation/parser, SQLite metadata store, RAG service, and pinned real Qdrant service. The external Ollama adapter response is deterministic in CI so this gate does not introduce a paid API requirement or force a model download in the CI runner.
+
+The same path proves cross-tenant listing/retrieval denial, cross-tenant read-only deletion denial, tenant-scoped vector reconciliation on delete, and Qdrant cleanup.
+
+## Final dependency, vulnerability, and committed-secret audit
+
+- Pull request: #40, `ci: add final dependency and secrets release gates`
+- Exact final PR head: `d4b971fba4cabf4f6ee61963dfcf14ce3dedae77`
+- Merge commit: `7bfff3b410497826c152804e913c1573bef74ac4`
+- Security workflow run: `32246413636`, conclusion `success`
+- CI run: `32246413661`, conclusion `success`
+- Workflow: `.github/workflows/security.yml`
+
+The security gate audits pinned backend production requirements with `pip-audit`, rejects high/critical frontend production findings with `npm audit --omit=dev --audit-level=high`, scans full Git history with checksum-verified Gitleaks, and runs GitHub Dependency Review on pull requests with `fail-on-severity: high`. The merged dependency baseline updated FastAPI/Starlette and Next.js to the compatible security set required to make those release gates green.
+
+Gitleaks output is redacted and the repository policy uses only a narrow deterministic historical test-fixture allowlist rather than a broad suppression. The successful exact-head security workflow is the release evidence for no unresolved high/critical production dependency finding and no unaccepted committed-secret finding under these configured scanners.
+
+## Backup operations deployment-contract repair
+
+- Pull request: #42, `fix: make documented backup operations profile runnable`
+- Exact final PR head: `b3134f0674561564b1d4a6df6cf63d22ad098d86`
+- Merge commit: `49de90fc68d396246f84fdf7c8353a3acbdf25e0`
+- CI run: `32246819439`, conclusion `success`
+- Security run: `32246819435`, conclusion `success`
+
+The final operations audit found that the documented `docker compose --profile ops run --rm backup ...` procedure lacked a matching Compose service. PR #42 added a profile-gated one-shot backup service using the production `python -m app.backup` CLI, the same data volume/Qdrant/metadata/maintenance-lock boundary, and no browser or provider credentials. CI now validates the `ops` profile and the full combined profile.
+
 ## Still open
 
-The following S17 items are intentionally not marked complete by this evidence:
+The following release items remain intentionally open:
 
-- representative production E2E ingestion/retrieval evidence covering the service API path;
-- final dependency/security/secrets audit evidence;
-- final operational/deployment/security documentation audit;
-- changelog/release notes and release version/tag;
-- governed zworkforce consumer integration merge and cross-repository SHA evidence.
+- final operational/deployment/security documentation audit reconciliation after the #42 repair;
+- governed zworkforce consumer integration merge and cross-repository SHA evidence;
+- changelog/release notes and release version/tag.
