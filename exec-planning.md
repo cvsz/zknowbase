@@ -22,6 +22,7 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 8. Idempotent lifecycle: deleting/reindexing a document also reconciles vectors.
 9. Least privilege: generated service keys are scoped, revocable/rotatable, and never persisted in plaintext.
 10. Durable local work: ingestion jobs use the metadata DB for leases/retries instead of a paid/external queue.
+11. Untrusted file content crosses a pre-parse security boundary before any PDF/text parser runs.
 
 ## Delivery slices
 
@@ -89,11 +90,21 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] job list/status/cancel APIs
 - [x] worker and queue unit/integration coverage
 
+### S9 — Pre-parse upload security
+- [x] centralized upload security policy shared by sync ingest, preview, reindex, and async worker
+- [x] reject spoofed PDFs, PDF active-content markers, NUL-bearing text, and invalid UTF-8 before parsing
+- [x] optional self-hosted ClamAV `INSTREAM` scanning with no file-path trust handoff
+- [x] scanner-unavailable and malware-positive results fail closed
+- [x] optional Docker Compose `security` profile with local ClamAV signature storage
+- [x] protocol-level unit tests for clean, detected, and unavailable scanner paths
+- [ ] stronger Content Disarm & Reconstruction (CDR) / PDF sanitization for hostile complex documents
+
 ## Production hardening backlog
 - [x] Replace single API key with scoped service keys + rotation/audit table.
 - [x] Optional local Postgres metadata backend for HA/multi-replica deployments.
 - [x] Queue-backed asynchronous ingestion for large corpora without an external broker.
-- [ ] Malware scanning / CDR before parsing untrusted uploads using self-hosted tools.
+- [x] Pre-parse malware scanning with optional self-hosted ClamAV and fail-closed enforcement.
+- [ ] Stronger CDR/sanitization for complex untrusted PDFs before extraction.
 - [ ] Local/OIDC-compatible RBAC for Admin UI without mandatory SaaS identity dependency.
 - [ ] Hybrid BM25+dense retrieval + local reranker.
 - [ ] Per-tenant collections and encryption policy.
@@ -105,9 +116,10 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - `pytest` backend tests green.
 - Python syntax/import validation green.
 - Frontend `npm run build` green.
-- Docker Compose default and optional `ha` profile validate.
+- Docker Compose default and optional `ha` / `security` profiles validate.
 - Postgres integration tests run against an actual local Postgres service in CI.
 - Durable queue tests prove FIFO claim, worker ownership, retries, cancel, and completion.
+- Upload security tests prove pre-parse rejection, ClamAV clean/detected behavior, and fail-closed scanner outages.
 - No secrets committed.
 - Missing/invalid/revoked/expired keys fail closed.
 - Read-only service keys cannot mutate documents.
