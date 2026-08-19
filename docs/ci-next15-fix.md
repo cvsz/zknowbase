@@ -1,5 +1,5 @@
 # Next.js 15 CI compatibility fix
 
-This change updates the admin root layout for the asynchronous `cookies()` API in Next.js 15 and removes an unused import in the Qdrant backup tests.
+This change updates the admin root layout for the asynchronous `cookies()` API in Next.js 15 and removes the unused import in the Qdrant backup test.
 
-A narrowly scoped Ruff per-file ignore is included for the pre-existing unused `os` import in `app/backup.py` so the dependency-upgrade merge queue can validate the functional Next.js migration without weakening lint rules repository-wide. The import should be removed directly in the next maintenance cleanup.
+The backend CI fixes also make backup archives owner-only (`0600`) after creation and isolate the Postgres queue ownership test from state left by earlier integration tests. No repository-wide lint suppression is required.
