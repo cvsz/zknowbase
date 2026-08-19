@@ -131,6 +131,16 @@ The embedding provider is intentionally separate from the LLM provider because A
 - Do not expose Qdrant or Ollama directly to untrusted networks in production; the published ports are for local development.
 - Production Admin UI still needs OIDC/RBAC; API-key auth is the service-to-service baseline, not full human identity governance.
 
+## Validation
+
+GitHub Actions validates three independent gates on pull requests:
+
+- backend: dependency install, Ruff, pytest
+- frontend: dependency install and Next.js production build
+- compose: `docker compose config --quiet`
+
+The foundation slice passed all three gates in CI run `32210611908`.
+
 ## Production roadmap
 
 See [`exec-planning.md`](./exec-planning.md). High-priority next slices are scoped service keys/audit, Postgres metadata + HA, async ingestion workers, malware/CDR scanning, OIDC/RBAC, hybrid retrieval/reranking, per-tenant collections, OpenTelemetry, and backup/restore evidence.
