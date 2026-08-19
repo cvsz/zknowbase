@@ -16,6 +16,7 @@ TENANT_ID_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
 
 class DocumentRecord(BaseModel):
     id: str
+    tenant_id: str = Field(default="default", min_length=1, max_length=63, pattern=TENANT_ID_PATTERN)
     name: str
     source_type: str
     source_uri: str | None = None
@@ -79,16 +80,9 @@ class QueryResponse(BaseModel):
     sources: list[SourceCitation]
 
 
-class HealthResponse(BaseModel):
-    status: str
-    qdrant: str
-    metadata_store: str
-    scanner: str = "validation-only"
-
-
 class ServiceKeyCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    scopes: list[ServiceKeyScope] = Field(min_length=1, max_length=4)
+    scopes: list[ServiceKeyScope] = Field(min_length=1)
     expires_at: datetime | None = None
 
 
@@ -105,7 +99,7 @@ class ServiceKeyRecord(BaseModel):
     rotated_from: str | None = None
 
 
-class ServiceKeyCreateResponse(BaseModel):
+class ServiceKeyCreated(BaseModel):
     key: ServiceKeyRecord
     secret: str
 
@@ -123,19 +117,21 @@ class AuditRecord(BaseModel):
 
 class IngestionJobRecord(BaseModel):
     id: str
-    document_id: str
     source_type: Literal["file", "url"]
-    source_uri: str
+    source_name: str
+    source_uri: str | None = None
+    content_type: str | None = None
+    local_path: str | None = None
+    size_bytes: int = 0
     status: IngestionJobStatus
     attempts: int = 0
     max_attempts: int = 3
     worker_id: str | None = None
     lease_expires_at: datetime | None = None
+    cancel_requested: bool = False
+    document_id: str | None = None
+    error: str | None = None
     created_at: datetime
     updated_at: datetime
-    error: str | None = None
-
-
-class AsyncIngestResponse(BaseModel):
-    document: DocumentRecord
-    job: IngestionJobRecord
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
