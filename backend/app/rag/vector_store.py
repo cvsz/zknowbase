@@ -4,7 +4,13 @@ from qdrant_client import AsyncQdrantClient, models
 
 from app.core.config import Settings
 from app.models.schemas import SourceCitation
-from app.observability import QDRANT_DURATION, QDRANT_ERRORS, timed, tracer
+from app.observability import (
+    AUTHORIZATION_DENIALS,
+    QDRANT_DURATION,
+    QDRANT_ERRORS,
+    timed,
+    tracer,
+)
 
 
 class VectorStore:
@@ -123,6 +129,7 @@ class VectorStore:
             payload = point.payload or {}
             payload_tenant = str(payload.get("tenant_id", ""))
             if payload_tenant != tenant_id:
+                AUTHORIZATION_DENIALS.labels(reason="tenant_vector_mismatch").inc()
                 continue
             results.append(
                 SourceCitation(
