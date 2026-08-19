@@ -366,10 +366,10 @@ def revoke_service_key(
 @router.get("/audit", response_model=list[AuditRecord])
 def list_security_audit(
     limit: int = Query(default=100, ge=1, le=500),
-    _principal: Principal = Depends(require_scopes("audit:read")),
+    principal: Principal = Depends(require_scopes("audit:read")),
     settings: Settings = Depends(get_settings),
 ) -> list[AuditRecord]:
-    return security_store(settings).list_audit(limit)
+    return security_store(settings).list_audit(limit, tenant_id=principal.tenant_id)
 
 
 router.include_router(read_secure)
