@@ -3,6 +3,7 @@ import uuid
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.queue_routes import router as queue_router
 from app.api.routes import router
 from app.core.config import get_settings
 
@@ -26,3 +27,4 @@ async def request_id(request: Request, call_next):
 
 
 app.include_router(router, prefix="/api/v1")
+app.include_router(queue_router, prefix="/api/v1")
