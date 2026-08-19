@@ -183,8 +183,10 @@ Evidence: zworkforce PR #168 (`feat: route zknowbase through governed knowledge 
 - [x] backup/restore DR drill evidence recorded, not only the runbook procedure
 - [x] bounded load/performance evidence recorded against a representative local workload
 - [x] final dependency/security/secrets audit evidence recorded
-- [ ] final operational/deployment/security documentation audit complete
-- [ ] changelog/release notes and release version/tag complete
+- [x] final operational/deployment/security documentation audit complete
+- [x] changelog/release notes and release version/tag complete
+
+Release evidence: release-candidate commit `e9ea3d69fca21bf21b3323cd289f1b5edab3787a` passed exact-head CI run `32256200249` and Security run `32256200225`, then merged through PR #49. Release `v0.1.0` resolves successfully in GitHub repository content and identifies release commit `b27352d64b200b79739653921c82551d4e06b7d6`. No open pull requests or open issues remained at final reconciliation.
 
 ## Production hardening backlog
 - [x] Replace single API key with scoped service keys + rotation/audit table.
@@ -198,7 +200,7 @@ Evidence: zworkforce PR #168 (`feat: route zknowbase through governed knowledge 
 - [x] OpenTelemetry traces/metrics and local SLO dashboards.
 - [x] Backup/restore runbook for SQLite/Postgres and Qdrant snapshots.
 - [x] zworkforce native module wiring after consumer-side interface review.
-- [ ] documentation-audit and final release evidence.
+- [x] documentation-audit and final release evidence.
 
 ## Acceptance gates
 - `pytest` backend tests green.
