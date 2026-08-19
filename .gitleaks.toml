@@ -1,0 +1,12 @@
+title = "zknowbase secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Historical deterministic Admin session-secret fixture in the local-auth unit test only"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^frontend/tests/admin-auth\.test\.ts$''']
+regexes = ['''process\.env\.ZKB_ADMIN_SESSION_SECRET\s*=\s*"[0-9a-f]{48}"''']
