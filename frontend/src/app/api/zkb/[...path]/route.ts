@@ -9,6 +9,7 @@ import {
 const backend = process.env.ZKB_BACKEND_URL ?? "http://backend:8000";
 const apiKey = process.env.ZKB_API_KEY;
 
+// Next.js 15 resolves dynamic route params asynchronously.
 type RouteContext = {
   params: Promise<{ path: string[] }>;
 };
