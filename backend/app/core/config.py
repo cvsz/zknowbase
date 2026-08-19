@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     openai_base_url: str = "https://api.openai.com/v1"
 
+    retrieval_mode: Literal["dense", "hybrid"] = "hybrid"
+    hybrid_candidate_multiplier: int = Field(default=4, ge=1, le=20)
+    hybrid_dense_weight: float = Field(default=0.65, ge=0.0, le=1.0)
+
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
