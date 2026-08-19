@@ -20,9 +20,7 @@ def mutation_lock(path: Path, *, exclusive: bool) -> Iterator[None]:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        if not exclusive:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
         try:
             yield
         finally:
