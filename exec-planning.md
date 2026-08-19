@@ -132,13 +132,23 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] pre-restore safety backup by default
 - [x] operator runbook with verification, isolated restore drill, RPO/RTO evidence checklist
 
+### S13 — Optional self-hosted OIDC login
+- [x] local username/password auth remains the default and requires no IdP
+- [x] authorization-code flow with PKCE and bounded state cookie
+- [x] discovery issuer equality and same-origin endpoint validation
+- [x] HTTPS-only IdP endpoints except loopback development
+- [x] token exchange and UserInfo subject validation
+- [x] configurable claim-to-viewer/admin mapping
+- [x] OIDC sessions reuse the existing signed HttpOnly Admin session boundary
+- [x] OIDC configuration/role/state regression tests run with the existing frontend auth gate
+
 ## Production hardening backlog
 - [x] Replace single API key with scoped service keys + rotation/audit table.
 - [x] Optional local Postgres metadata backend for HA/multi-replica deployments.
 - [x] Queue-backed asynchronous ingestion for large corpora without an external broker.
 - [x] Malware scanning / active-content rejection before parsing untrusted uploads using self-hosted tools.
 - [x] Local Admin UI human authentication + viewer/admin RBAC without mandatory SaaS identity.
-- [ ] Optional OIDC login adapter for self-hosted identity providers.
+- [x] Optional OIDC login adapter for self-hosted identity providers.
 - [x] Hybrid BM25+dense retrieval + local reranker.
 - [ ] Per-tenant collections and encryption policy.
 - [ ] OpenTelemetry traces/metrics and local SLO dashboards.
@@ -148,7 +158,7 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 ## Acceptance gates
 - `pytest` backend tests green.
 - Python syntax/import validation green.
-- Frontend local-auth tests and `npm run build` green.
+- Frontend local-auth/OIDC tests and `npm run build` green.
 - Docker Compose default, `ha`, `security`, and combined local profiles validate.
 - Postgres integration tests run against an actual local Postgres service in CI.
 - Durable queue tests prove FIFO claim, worker ownership, retries, cancel, and completion.
