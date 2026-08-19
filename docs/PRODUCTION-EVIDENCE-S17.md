@@ -65,10 +65,21 @@ Gitleaks output is redacted and the repository policy uses only a narrow determi
 
 The final operations audit found that the documented `docker compose --profile ops run --rm backup ...` procedure lacked a matching Compose service. PR #42 added a profile-gated one-shot backup service using the production `python -m app.backup` CLI, the same data volume/Qdrant/metadata/maintenance-lock boundary, and no browser or provider credentials. CI now validates the `ops` profile and the full combined profile.
 
+## Governed zworkforce consumer integration
+
+- Consumer repository: `cvsz/zworkforce`
+- Pull request: #168, `feat: route zknowbase through governed knowledge tools`
+- Exact PR head: `e8c4cb1c519f1c53359c263839c2601150b78846`
+- Consumer merge/main commit: `00b1aa3db1c9da15e8eb4e635b455181d1c03213`
+- zknowbase baseline main before this evidence reconciliation: `b35f32513932aa76fe59265911f829d3cea2e5d4`
+
+The consumer integration is merged to zworkforce `main`. Agent retrieval is exposed as read-only `knowledge_search` and `knowledge_ask` tools through the normal ToolExecutor/allowed-tools governance path. It uses server-side tenant-bound `knowledge:read` credentials, supports a bounded per-tenant credential map, fails closed when the requested tenant lacks a matching credential, sends versioned tenant/actor/agent/tool/policy/request/trace context, and rejects cross-tenant response payloads. Agents do not access Qdrant directly and service credentials are not exposed to browser code.
+
+This closes the consumer-side S16 merge blocker and provides immutable cross-repository SHA evidence. Final release metadata still requires the zknowbase release commit/tag produced after the remaining documentation audit and release-version work.
+
 ## Still open
 
 The following release items remain intentionally open:
 
-- final operational/deployment/security documentation audit reconciliation after the #42 repair;
-- governed zworkforce consumer integration merge and cross-repository SHA evidence;
+- final operational/deployment/security documentation audit reconciliation;
 - changelog/release notes and release version/tag.
