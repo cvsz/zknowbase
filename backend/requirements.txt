@@ -9,4 +9,7 @@ pypdf==6.15.0
 beautifulsoup4==4.13.4
 langchain-text-splitters==1.1.2
 psycopg[binary,pool]==3.3.4
-cryptography==49.0.0
+cryptography==46.0.0
+prometheus-client==0.26.0
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0
