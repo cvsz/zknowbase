@@ -57,7 +57,29 @@ jobs:
           tar -xzf "$archive" -C /tmp gitleaks
           /tmp/gitleaks version
       - name: Scan Git history for committed secrets
-        run: /tmp/gitleaks git --redact --no-banner --exit-code 1 .
+        shell: bash
+        run: |
+          set -euo pipefail
+          report=/tmp/gitleaks.json
+          /tmp/gitleaks git --redact --no-banner --exit-code 0 \
+            --report-format json --report-path "$report" .
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          findings = json.loads(Path('/tmp/gitleaks.json').read_text(encoding='utf-8'))
+          for finding in findings:
+              print(
+                  'secret finding:',
+                  f"rule={finding.get('RuleID', 'unknown')}",
+                  f"file={finding.get('File', 'unknown')}",
+                  f"line={finding.get('StartLine', 'unknown')}",
+                  f"commit={finding.get('Commit', 'unknown')}",
+              )
+          if findings:
+              raise SystemExit(f"Gitleaks found {len(findings)} committed secret candidate(s)")
+          print('Gitleaks found no committed secrets')
+          PY
 
   dependency-review:
     if: github.event_name == 'pull_request'
