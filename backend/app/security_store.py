@@ -88,6 +88,12 @@ class SecurityStore:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
+    @staticmethod
+    def _new_material() -> tuple[str, str, str]:
+        prefix = f"zkb_{uuid4().hex[:12]}"
+        raw_key = f"{prefix}.{secrets.token_urlsafe(32)}"
+        return prefix, raw_key, SecurityStore._digest(raw_key)
+
     def create_key(
         self,
         name: str,
@@ -97,8 +103,7 @@ class SecurityStore:
         rotated_from: str | None = None,
     ) -> tuple[ServiceKeyRecord, str]:
         key_id = str(uuid4())
-        prefix = f"zkb_{uuid4().hex[:12]}"
-        raw_key = f"{prefix}.{secrets.token_urlsafe(32)}"
+        prefix, raw_key, key_hash = self._new_material()
         created_at = self.now()
         expires_at = self._normalize_time(expires_at)
         normalized_scopes = sorted(set(scopes))
@@ -113,7 +118,7 @@ class SecurityStore:
                     key_id,
                     name,
                     prefix,
-                    self._digest(raw_key),
+                    key_hash,
                     json.dumps(normalized_scopes),
                     created_at.isoformat(),
                     expires_at.isoformat() if expires_at else None,
@@ -184,17 +189,55 @@ class SecurityStore:
             return cur.rowcount > 0
 
     def rotate(self, key_id: str) -> tuple[ServiceKeyRecord, str] | None:
-        old = self.get_key(key_id)
-        if old is None or old.revoked_at is not None:
-            return None
-        new_record, raw_key = self.create_key(
-            old.name,
-            old.scopes,
-            old.expires_at,
+        """Atomically create the replacement key and revoke the old key."""
+        new_id = str(uuid4())
+        prefix, raw_key, key_hash = self._new_material()
+        created_at = self.now()
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM service_keys WHERE id=?", (key_id,)).fetchone()
+            if not row:
+                return None
+            old = self._to_key_record(row)
+            if old.revoked_at is not None:
+                return None
+            if old.expires_at is not None and old.expires_at <= created_at:
+                return None
+            conn.execute(
+                """
+                INSERT INTO service_keys
+                (id,name,key_prefix,key_hash,scopes,created_at,expires_at,revoked_at,last_used_at,rotated_from)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    new_id,
+                    old.name,
+                    prefix,
+                    key_hash,
+                    json.dumps(sorted(set(old.scopes))),
+                    created_at.isoformat(),
+                    old.expires_at.isoformat() if old.expires_at else None,
+                    None,
+                    None,
+                    old.id,
+                ),
+            )
+            conn.execute(
+                "UPDATE service_keys SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
+                (created_at.isoformat(), old.id),
+            )
+            conn.commit()
+        record = ServiceKeyRecord(
+            id=new_id,
+            name=old.name,
+            key_prefix=prefix,
+            scopes=sorted(set(old.scopes)),
+            created_at=created_at,
+            expires_at=old.expires_at,
+            revoked_at=None,
+            last_used_at=None,
             rotated_from=old.id,
         )
-        self.revoke(old.id)
-        return new_record, raw_key
+        return record, raw_key
 
     def audit(
         self,
