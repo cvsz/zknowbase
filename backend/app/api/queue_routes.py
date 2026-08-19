@@ -4,7 +4,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from app.core.config import Settings, get_settings
-from app.core.security import require_scopes
+from app.core.security import Principal, require_scopes
 from app.models.schemas import (
     AsyncIngestResponse,
     DocumentRecord,
@@ -21,10 +21,10 @@ router = APIRouter()
     "/ingest/async",
     response_model=AsyncIngestResponse,
     status_code=202,
-    dependencies=[Depends(require_scopes("knowledge:write"))],
 )
 async def enqueue_file(
     file: UploadFile = File(...),
+    principal: Principal = Depends(require_scopes("knowledge:write")),
     settings: Settings = Depends(get_settings),
 ) -> AsyncIngestResponse:
     filename = Path(file.filename or "upload").name
@@ -45,6 +45,7 @@ async def enqueue_file(
     record = DocumentRecord(
         id=doc_id,
         name=filename,
+        tenant_id=principal.tenant_id,
         source_type="file",
         source_uri=str(saved),
         content_type=file.content_type,
@@ -62,6 +63,7 @@ async def enqueue_file(
             "file",
             str(saved),
             settings.ingestion_job_max_attempts,
+            tenant_id=principal.tenant_id,
         )
     except Exception as exc:
         saved.unlink(missing_ok=True)
@@ -74,10 +76,10 @@ async def enqueue_file(
     "/ingest/url/async",
     response_model=AsyncIngestResponse,
     status_code=202,
-    dependencies=[Depends(require_scopes("knowledge:write"))],
 )
 def enqueue_url(
     body: UrlIngestRequest,
+    principal: Principal = Depends(require_scopes("knowledge:write")),
     settings: Settings = Depends(get_settings),
 ) -> AsyncIngestResponse:
     url = str(body.url)
@@ -88,6 +90,7 @@ def enqueue_url(
     record = DocumentRecord(
         id=doc_id,
         name=url,
+        tenant_id=principal.tenant_id,
         source_type="url",
         source_uri=url,
         status="queued",
@@ -101,6 +104,7 @@ def enqueue_url(
             "url",
             url,
             settings.ingestion_job_max_attempts,
+            tenant_id=principal.tenant_id,
         )
     except Exception as exc:
         docs.delete(record.id)
@@ -111,25 +115,25 @@ def enqueue_url(
 @router.get(
     "/ingest/jobs",
     response_model=list[IngestionJobRecord],
-    dependencies=[Depends(require_scopes("knowledge:read"))],
 )
 def list_ingestion_jobs(
     limit: int = Query(default=100, ge=1, le=500),
+    principal: Principal = Depends(require_scopes("knowledge:read")),
     settings: Settings = Depends(get_settings),
 ) -> list[IngestionJobRecord]:
-    return ingestion_queue(settings).list(limit)
+    return ingestion_queue(settings).list(limit, principal.tenant_id)
 
 
 @router.get(
     "/ingest/jobs/{job_id}",
     response_model=IngestionJobRecord,
-    dependencies=[Depends(require_scopes("knowledge:read"))],
 )
 def get_ingestion_job(
     job_id: str,
+    principal: Principal = Depends(require_scopes("knowledge:read")),
     settings: Settings = Depends(get_settings),
 ) -> IngestionJobRecord:
-    job = ingestion_queue(settings).get(job_id)
+    job = ingestion_queue(settings).get(job_id, principal.tenant_id)
     if job is None:
         raise HTTPException(404, "Ingestion job not found")
     return job
@@ -138,22 +142,22 @@ def get_ingestion_job(
 @router.delete(
     "/ingest/jobs/{job_id}",
     status_code=204,
-    dependencies=[Depends(require_scopes("knowledge:write"))],
 )
 def cancel_ingestion_job(
     job_id: str,
+    principal: Principal = Depends(require_scopes("knowledge:write")),
     settings: Settings = Depends(get_settings),
 ) -> None:
     queue = ingestion_queue(settings)
-    job = queue.get(job_id)
+    job = queue.get(job_id, principal.tenant_id)
     if job is None:
         raise HTTPException(404, "Ingestion job not found")
-    if not queue.cancel(job_id):
+    if not queue.cancel(job_id, principal.tenant_id):
         raise HTTPException(409, "Only queued ingestion jobs can be cancelled")
 
     docs = document_store(settings)
     record = docs.get(job.document_id)
-    if record is not None:
+    if record is not None and record.tenant_id == principal.tenant_id:
         record.status = "cancelled"
         record.updated_at = docs.now()
         record.error = None

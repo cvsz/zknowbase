@@ -22,21 +22,31 @@ async def _heartbeat(queue, job_id: str, worker_id: str, lease_seconds: int) -> 
             raise RuntimeError("Ingestion job lease ownership was lost")
 
 
+def _tenant_document(docs, job):
+    record = docs.get(job.document_id)
+    if record is None:
+        return None
+    if record.tenant_id != job.tenant_id:
+        raise RuntimeError("Ingestion job tenant ownership does not match document tenant")
+    return record
+
+
 def _reap_and_reconcile(queue, settings) -> None:
     docs = document_store(settings)
     for job in queue.reap_expired():
-        record = docs.get(job.document_id)
+        record = _tenant_document(docs, job)
         if record is None:
             continue
-        if job.status == "failed" and not queue.active_for_document(job.document_id):
+        if job.status == "failed" and not queue.active_for_document(job.document_id, job.tenant_id):
             record.status = "failed"
             record.error = job.error or "job lease expired"
             record.updated_at = docs.now()
             docs.upsert(record)
             logger.error(
-                "ingestion_lease_expired_terminal job_id=%s document_id=%s",
+                "ingestion_lease_expired_terminal job_id=%s document_id=%s tenant_id=%s",
                 job.id,
                 job.document_id,
+                job.tenant_id,
             )
         elif job.status == "queued":
             record.status = "queued"
@@ -44,9 +54,10 @@ def _reap_and_reconcile(queue, settings) -> None:
             record.updated_at = docs.now()
             docs.upsert(record)
             logger.warning(
-                "ingestion_lease_expired_requeued job_id=%s document_id=%s attempt=%s/%s",
+                "ingestion_lease_expired_requeued job_id=%s document_id=%s tenant_id=%s attempt=%s/%s",
                 job.id,
                 job.document_id,
+                job.tenant_id,
                 job.attempts,
                 job.max_attempts,
             )
@@ -70,9 +81,10 @@ async def _run_job(queue, job, worker_id: str, settings) -> None:
         if not queue.complete(job.id, worker_id):
             raise RuntimeError("Ingestion job completion rejected after lease loss")
         logger.info(
-            "ingestion_completed job_id=%s document_id=%s chunks=%s",
+            "ingestion_completed job_id=%s document_id=%s tenant_id=%s chunks=%s",
             job.id,
             result.id,
+            job.tenant_id,
             result.chunk_count,
         )
     except Exception as exc:
@@ -88,13 +100,18 @@ async def _run_job(queue, job, worker_id: str, settings) -> None:
             with suppress(Exception):
                 current = queue.get(job.id)
                 docs = document_store(settings)
-                record = docs.get(job.document_id)
-                if record is not None and current is not None:
+                record = _tenant_document(docs, job)
+                if record is not None and current is not None and current.tenant_id == job.tenant_id:
                     record.status = "queued" if current.status == "queued" else "failed"
                     record.error = str(exc)[:4000]
                     record.updated_at = docs.now()
                     docs.upsert(record)
-        logger.exception("ingestion_failed job_id=%s document_id=%s", job.id, job.document_id)
+        logger.exception(
+            "ingestion_failed job_id=%s document_id=%s tenant_id=%s",
+            job.id,
+            job.document_id,
+            job.tenant_id,
+        )
     finally:
         heartbeat.cancel()
         with suppress(asyncio.CancelledError):
@@ -118,9 +135,10 @@ async def run_worker() -> None:
             job = queue.claim_next(worker_id, settings.worker_lease_seconds)
             if job is not None:
                 logger.info(
-                    "ingestion_claimed job_id=%s document_id=%s attempt=%s/%s",
+                    "ingestion_claimed job_id=%s document_id=%s tenant_id=%s attempt=%s/%s",
                     job.id,
                     job.document_id,
+                    job.tenant_id,
                     job.attempts,
                     job.max_attempts,
                 )
