@@ -1,9 +1,20 @@
 from functools import lru_cache
 
+from psycopg_pool import ConnectionPool
+
 from app.core.config import Settings
-from app.postgres_store import PostgresDocumentStore, PostgresSecurityStore
+from app.postgres_store import (
+    PostgresDocumentStore,
+    PostgresSecurityStore,
+    create_postgres_pool,
+)
 from app.security_store import SecurityStore
 from app.store import DocumentStore
+
+
+@lru_cache(maxsize=4)
+def _postgres_pool(dsn: str, min_size: int, max_size: int) -> ConnectionPool:
+    return create_postgres_pool(dsn, min_size, max_size)
 
 
 @lru_cache(maxsize=4)
@@ -12,7 +23,7 @@ def _postgres_document_store(
     min_size: int,
     max_size: int,
 ) -> PostgresDocumentStore:
-    return PostgresDocumentStore(dsn, min_size, max_size)
+    return PostgresDocumentStore(_postgres_pool(dsn, min_size, max_size))
 
 
 @lru_cache(maxsize=4)
@@ -21,7 +32,7 @@ def _postgres_security_store(
     min_size: int,
     max_size: int,
 ) -> PostgresSecurityStore:
-    return PostgresSecurityStore(dsn, min_size, max_size)
+    return PostgresSecurityStore(_postgres_pool(dsn, min_size, max_size))
 
 
 def document_store(settings: Settings):
