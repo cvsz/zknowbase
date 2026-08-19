@@ -7,13 +7,13 @@ down:
 	docker compose down
 
 backend-test:
-	cd backend && pytest -q
+	cd backend && PYTHONPATH=. python -m pytest -q
 
 backend-lint:
-	cd backend && ruff check app tests
+	cd backend && PYTHONPATH=. python -m ruff check app tests
 
 frontend-build:
 	cd frontend && npm run build
 
 validate: backend-lint backend-test frontend-build
-	docker compose config --quiet
+	ZKB_API_KEY=$${ZKB_API_KEY:-local-validation-secret} docker compose config --quiet
