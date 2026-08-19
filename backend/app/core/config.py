@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     postgres_pool_max_size: int = Field(default=10, ge=1, le=100)
     upload_dir: Path = Path("data/uploads")
     backup_dir: Path = Path("data/backups")
+    backup_encryption_key_file: Path | None = None
+    backup_require_encryption: bool = False
     maintenance_lock_path: Path = Path("data/.mutation.lock")
     max_upload_mb: int = 25
     max_url_bytes: int = 5_000_000
@@ -69,6 +71,10 @@ class Settings(BaseSettings):
             raise ValueError("ZKB_POSTGRES_URL is required when ZKB_METADATA_BACKEND=postgres")
         if self.postgres_pool_max_size < self.postgres_pool_min_size:
             raise ValueError("ZKB_POSTGRES_POOL_MAX_SIZE must be >= ZKB_POSTGRES_POOL_MIN_SIZE")
+        if self.backup_require_encryption and self.backup_encryption_key_file is None:
+            raise ValueError(
+                "ZKB_BACKUP_ENCRYPTION_KEY_FILE is required when ZKB_BACKUP_REQUIRE_ENCRYPTION=true"
+            )
         return self
 
     def ensure_paths(self) -> None:
