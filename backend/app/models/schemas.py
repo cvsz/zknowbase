@@ -11,6 +11,7 @@ ServiceKeyScope = Literal[
 ]
 
 IngestionJobStatus = Literal["queued", "processing", "completed", "failed", "cancelled"]
+TENANT_ID_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
 
 
 class DocumentRecord(BaseModel):
@@ -94,6 +95,7 @@ class ServiceKeyCreateRequest(BaseModel):
 class ServiceKeyRecord(BaseModel):
     id: str
     name: str
+    tenant_id: str = Field(default="default", min_length=1, max_length=63, pattern=TENANT_ID_PATTERN)
     key_prefix: str
     scopes: list[str]
     created_at: datetime

@@ -2,7 +2,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
-from app.core.security import require_api_key, require_scopes
+from app.core.security import Principal, require_api_key, require_scopes
 from app.security_store import SecurityStore
 
 
@@ -45,13 +45,24 @@ def test_scoped_service_key_enforces_read_write_boundary(monkeypatch, tmp_path):
     def write():
         return {"ok": True}
 
+    @app.get("/whoami")
+    def whoami(principal: Principal = Depends(require_api_key)):
+        return {"tenant_id": principal.tenant_id, "principal_id": principal.id}
+
     client = TestClient(app)
     headers = {"X-API-Key": raw_key}
     assert client.get("/read", headers=headers).status_code == 200
     assert client.post("/write", headers=headers).status_code == 403
+    identity_response = client.get("/whoami", headers=headers)
+    assert identity_response.status_code == 200
+    assert identity_response.json() == {
+        "tenant_id": "default",
+        "principal_id": service_key.id,
+    }
 
     bootstrap = {"X-API-Key": "this-is-a-test-secret-key"}
     assert client.post("/write", headers=bootstrap).status_code == 200
+    assert client.get("/whoami", headers=bootstrap).json()["tenant_id"] == "default"
 
     audit = SecurityStore(settings.metadata_db).list_audit(20)
     assert any(
