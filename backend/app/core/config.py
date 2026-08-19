@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
 
     request_timeout_seconds: float = 90.0
+
+    @model_validator(mode="after")
+    def validate_production_secret(self) -> "Settings":
+        if self.environment.lower() == "production" and self.api_key == "change-me-long-random-secret":
+            raise ValueError("ZKB_API_KEY must be replaced before production startup")
+        return self
 
     def ensure_paths(self) -> None:
         self.metadata_db.parent.mkdir(parents=True, exist_ok=True)
