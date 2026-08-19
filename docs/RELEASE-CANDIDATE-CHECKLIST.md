@@ -1,6 +1,6 @@
 # Final Release Candidate Checklist
 
-This checklist is intentionally evidence-driven. It must not be converted to a final-release claim until every item is backed by current-main CI/security evidence and the final release commit/tag.
+This checklist is evidence-driven. Final-release status requires the release candidate to pass exact-head CI/Security, merge under repository policy, and have the release tag verified against the exact final `main` commit.
 
 ## Architecture and security
 
@@ -25,16 +25,16 @@ This checklist is intentionally evidence-driven. It must not be converted to a f
 - [x] Backend/frontend dependency audit and committed-secret scan gates.
 - [x] Production deployment/upgrade/rollback guide merged.
 - [x] zworkforce PR #168 merged as `00b1aa3db1c9da15e8eb4e635b455181d1c03213`.
+- [x] Final operational/deployment/security documentation audit reconciled against current `main` documentation set.
+- [x] Release version determined as `0.1.0`, matching both FastAPI and Admin package version surfaces.
+- [x] `CHANGELOG.md` and `docs/RELEASE-NOTES-v0.1.0.md` record the complete S1-S17 production scope.
 
 ## Final release work still required
 
-- [ ] Reconcile the final operational/deployment/security documentation audit against current main.
-- [ ] Determine the release version from repository history and compatibility policy.
-- [ ] Update CHANGELOG/release notes with the complete S1-S17 production scope.
-- [ ] Run exact-head CI and Security workflows for the release candidate.
+- [ ] Run exact-head CI and Security workflows for this release candidate.
 - [ ] Verify no open failing/stale release PR remains.
 - [ ] Merge the release candidate under repository policy.
-- [ ] Record the final zknowbase main SHA.
-- [ ] Create and verify the release tag against that exact commit.
+- [ ] Record the final zknowbase `main` SHA.
+- [ ] Create and verify tag `v0.1.0` against that exact commit.
 
-Until these final items are complete, the release verdict remains `FINAL RELEASE — BLOCKED`.
+Until those final repository operations are complete, the release verdict remains `FINAL RELEASE — BLOCKED`.
