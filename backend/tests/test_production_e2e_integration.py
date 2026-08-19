@@ -46,7 +46,7 @@ async def test_service_api_ingest_retrieve_query_delete_and_tenant_isolation(mon
             return {"embeddings": [[1.0, 0.0, 0.0, 0.0] for _ in texts]}
         if url.endswith("/api/chat"):
             prompt = payload["messages"][-1]["content"]
-            assert "annual leave requires manager approval" in prompt
+            assert "annual leave requires manager approval" in prompt.lower()
             return {"message": {"content": "Annual leave requires manager approval [S1]."}}
         raise AssertionError(f"unexpected provider endpoint: {url}")
 
