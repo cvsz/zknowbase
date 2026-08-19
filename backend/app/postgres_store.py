@@ -10,18 +10,23 @@ from psycopg_pool import ConnectionPool
 from app.models.schemas import AuditRecord, DocumentRecord, ServiceKeyRecord
 
 
+def create_postgres_pool(dsn: str, min_size: int = 1, max_size: int = 10) -> ConnectionPool:
+    pool = ConnectionPool(
+        dsn,
+        kwargs={"row_factory": dict_row},
+        min_size=min_size,
+        max_size=max_size,
+        open=True,
+        check=ConnectionPool.check_connection,
+        timeout=10.0,
+    )
+    pool.wait(timeout=10.0)
+    return pool
+
+
 class _PostgresBase:
-    def __init__(self, dsn: str, min_size: int = 1, max_size: int = 10):
-        self.pool = ConnectionPool(
-            dsn,
-            kwargs={"row_factory": dict_row},
-            min_size=min_size,
-            max_size=max_size,
-            open=True,
-            check=ConnectionPool.check_connection,
-            timeout=10.0,
-        )
-        self.pool.wait(timeout=10.0)
+    def __init__(self, pool: ConnectionPool):
+        self.pool = pool
 
     @staticmethod
     def now() -> datetime:
@@ -29,8 +34,8 @@ class _PostgresBase:
 
 
 class PostgresDocumentStore(_PostgresBase):
-    def __init__(self, dsn: str, min_size: int = 1, max_size: int = 10):
-        super().__init__(dsn, min_size, max_size)
+    def __init__(self, pool: ConnectionPool):
+        super().__init__(pool)
         self._init_db()
 
     def _init_db(self) -> None:
@@ -97,8 +102,8 @@ class PostgresDocumentStore(_PostgresBase):
 
 
 class PostgresSecurityStore(_PostgresBase):
-    def __init__(self, dsn: str, min_size: int = 1, max_size: int = 10):
-        super().__init__(dsn, min_size, max_size)
+    def __init__(self, pool: ConnectionPool):
+        super().__init__(pool)
         self._init_db()
 
     def _init_db(self) -> None:
