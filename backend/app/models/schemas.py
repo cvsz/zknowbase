@@ -114,6 +114,7 @@ class ServiceKeyCreateResponse(BaseModel):
 
 class AuditRecord(BaseModel):
     id: str
+    tenant_id: str | None = Field(default=None, min_length=1, max_length=63, pattern=TENANT_ID_PATTERN)
     principal_id: str | None = None
     key_prefix: str | None = None
     action: str
