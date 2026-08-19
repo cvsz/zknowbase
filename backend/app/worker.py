@@ -49,16 +49,23 @@ async def _run_job(queue, job, worker_id: str, settings) -> None:
             processing.cancel()
             with suppress(asyncio.CancelledError):
                 await processing
+
+        # Only the current lease owner may transition the job and reconcile the
+        # document. A stale worker must not overwrite state after another worker
+        # has reclaimed the job.
+        transitioned = False
         with suppress(Exception):
-            queue.fail(job.id, worker_id, str(exc))
-            current = queue.get(job.id)
-            docs = document_store(settings)
-            record = docs.get(job.document_id)
-            if record is not None and current is not None:
-                record.status = "queued" if current.status == "queued" else "failed"
-                record.error = str(exc)[:4000]
-                record.updated_at = docs.now()
-                docs.upsert(record)
+            transitioned = queue.fail(job.id, worker_id, str(exc))
+        if transitioned:
+            with suppress(Exception):
+                current = queue.get(job.id)
+                docs = document_store(settings)
+                record = docs.get(job.document_id)
+                if record is not None and current is not None:
+                    record.status = "queued" if current.status == "queued" else "failed"
+                    record.error = str(exc)[:4000]
+                    record.updated_at = docs.now()
+                    docs.upsert(record)
         logger.exception("ingestion_failed job_id=%s document_id=%s", job.id, job.document_id)
     finally:
         heartbeat.cancel()
