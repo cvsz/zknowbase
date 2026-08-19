@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:auth": "node --experimental-strip-types --test tests/admin-auth.test.ts"
+    "test:auth": "node --experimental-strip-types --test tests/admin-auth.test.ts tests/oidc.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-slot": "1.2.3",
