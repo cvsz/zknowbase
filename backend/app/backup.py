@@ -39,6 +39,7 @@ POSTGRES_REQUIRED_TABLES = (
 POSTGRES_TENANT_MAPPING_TABLES = (
     "service_key_tenants",
     "ingestion_job_tenants",
+    "security_audit_tenants",
 )
 POSTGRES_TABLES = POSTGRES_REQUIRED_TABLES + POSTGRES_TENANT_MAPPING_TABLES
 
@@ -196,7 +197,7 @@ def _restore_postgres(settings: Settings, source_path: Path) -> None:
     with psycopg.connect(settings.postgres_url, row_factory=dict_row) as conn:
         with conn.transaction():
             conn.execute(
-                "TRUNCATE ingestion_job_tenants, service_key_tenants, "
+                "TRUNCATE security_audit_tenants, ingestion_job_tenants, service_key_tenants, "
                 "ingestion_jobs, security_audit, service_keys, documents"
             )
             for table in POSTGRES_TABLES:
