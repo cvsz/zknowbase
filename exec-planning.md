@@ -157,6 +157,33 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] backup/restore preserves key/job/audit tenant sidecars on current Postgres archives
 - [x] explicit self-hosted encryption policy defines secrets, data-at-rest, transport, backups, key ownership/rotation, and non-claims without inventing custom cryptography
 
+### S15 — Local observability and SLOs
+- [x] OpenTelemetry-compatible tracing for API, retrieval, provider, Qdrant, ingestion, upload scanning, and database paths
+- [x] bounded Prometheus request/provider/queue/auth/error metrics without secrets or raw document contents
+- [x] telemetry exporter failure remains fail-open for core retrieval availability
+- [x] optional local OpenTelemetry Collector + Prometheus + Grafana Compose profile; no hosted telemetry required
+- [x] local API/retrieval/provider/ingestion/error/backlog dashboard provisioning
+- [x] documented initial availability, latency, ingestion, queue-health, and Qdrant SLO objectives
+- [x] Grafana anonymous access disabled and observability profile requires an operator-controlled local admin secret
+
+### S16 — Governed zworkforce integration
+- [x] zknowbase validates versioned governed retrieval context on the authenticated `knowledge:read` API boundary
+- [x] authenticated service-key tenant remains authoritative; consumer tenant metadata cannot override it
+- [x] malformed, incomplete, cross-tenant, or request-ID-inconsistent governed context fails closed
+- [ ] `cvsz/zworkforce` read-only `knowledge_search` / `knowledge_ask` tools merged to consumer `main`
+- [ ] consumer integration proven green under zworkforce branch protection and required reviewer policy
+- [ ] cross-repository release evidence records both final SHAs and least-privilege credential configuration
+
+### S17 — Production release evidence
+- [x] real Postgres integration is exercised in CI
+- [x] real Qdrant shared-collection lifecycle is exercised in CI with cross-tenant search/delete negative coverage
+- [ ] representative production E2E retrieval/ingestion validation documented
+- [ ] backup/restore DR drill evidence recorded, not only the runbook procedure
+- [ ] bounded load/performance evidence recorded against a representative local workload
+- [ ] final dependency/security/secrets audit evidence recorded
+- [ ] final operational/deployment/security documentation audit complete
+- [ ] changelog/release notes and release version/tag complete
+
 ## Production hardening backlog
 - [x] Replace single API key with scoped service keys + rotation/audit table.
 - [x] Optional local Postgres metadata backend for HA/multi-replica deployments.
@@ -166,16 +193,18 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] Optional OIDC login adapter for self-hosted identity providers.
 - [x] Hybrid BM25+dense retrieval + local reranker.
 - [x] Tenant-isolated shared Qdrant storage and explicit encryption policy (chosen over per-tenant collections after enforcing authenticated-principal tenant payload boundaries).
-- [ ] OpenTelemetry traces/metrics and local SLO dashboards.
+- [x] OpenTelemetry traces/metrics and local SLO dashboards.
 - [x] Backup/restore runbook for SQLite/Postgres and Qdrant snapshots.
 - [ ] zworkforce native module wiring after consumer-side interface review.
+- [ ] production E2E, DR-drill, performance, security-audit, and release evidence.
 
 ## Acceptance gates
 - `pytest` backend tests green.
 - Python syntax/import validation green.
 - Frontend local-auth/OIDC tests and `npm run build` green.
-- Docker Compose default, `ha`, `security`, and combined local profiles validate.
+- Docker Compose default, `ha`, `security`, `observability`, and combined local profiles validate.
 - Postgres integration tests run against an actual local Postgres service in CI.
+- Qdrant lifecycle tests run against an actual pinned local Qdrant service in CI.
 - Durable queue tests prove FIFO claim, worker ownership, retries, cancel, and completion.
 - PDF active content and embedded files are rejected before text extraction.
 - ClamAV mode fails closed and uses only the internal Compose network.
@@ -192,4 +221,6 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - Delete removes both metadata and vectors within the authenticated tenant boundary.
 - Current Postgres backups preserve service-key, ingestion-job, and immutable audit tenant ownership.
 - Encryption documentation makes no application-layer confidentiality claim beyond implemented primitives and requires encrypted storage/transport where the threat model demands it.
+- Local observability does not require paid SaaS, does not expose document contents/secrets, and Grafana anonymous access remains disabled.
+- Governed zworkforce retrieval uses only the service API boundary and least-privilege `knowledge:read` credentials; agents never access Qdrant directly.
 - Default runtime requires no paid API, managed service, hosted identity, or external queue.
