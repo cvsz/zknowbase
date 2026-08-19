@@ -3,7 +3,7 @@ import json
 import secrets
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -158,12 +158,16 @@ class SecurityStore:
                 return None
             if record.expires_at is not None and record.expires_at <= now:
                 return None
-            conn.execute(
-                "UPDATE service_keys SET last_used_at=? WHERE id=?",
-                (now.isoformat(), record.id),
-            )
-            conn.commit()
-            record.last_used_at = now
+
+            # Avoid a SQLite write on every RAG query. last_used_at is operational
+            # metadata, so five-minute granularity is enough for rotation/audit use.
+            if record.last_used_at is None or record.last_used_at <= now - timedelta(minutes=5):
+                conn.execute(
+                    "UPDATE service_keys SET last_used_at=? WHERE id=?",
+                    (now.isoformat(), record.id),
+                )
+                conn.commit()
+                record.last_used_at = now
             return record
 
     def get_key(self, key_id: str) -> ServiceKeyRecord | None:
@@ -189,19 +193,32 @@ class SecurityStore:
             return cur.rowcount > 0
 
     def rotate(self, key_id: str) -> tuple[ServiceKeyRecord, str] | None:
-        """Atomically create the replacement key and revoke the old key."""
+        """Atomically create a replacement and revoke the old key across processes."""
         new_id = str(uuid4())
         prefix, raw_key, key_hash = self._new_material()
         created_at = self.now()
         with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT * FROM service_keys WHERE id=?", (key_id,)).fetchone()
             if not row:
+                conn.rollback()
                 return None
             old = self._to_key_record(row)
             if old.revoked_at is not None:
+                conn.rollback()
                 return None
             if old.expires_at is not None and old.expires_at <= created_at:
+                conn.rollback()
                 return None
+
+            revoked = conn.execute(
+                "UPDATE service_keys SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
+                (created_at.isoformat(), old.id),
+            )
+            if revoked.rowcount != 1:
+                conn.rollback()
+                return None
+
             conn.execute(
                 """
                 INSERT INTO service_keys
@@ -220,10 +237,6 @@ class SecurityStore:
                     None,
                     old.id,
                 ),
-            )
-            conn.execute(
-                "UPDATE service_keys SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
-                (created_at.isoformat(), old.id),
             )
             conn.commit()
         record = ServiceKeyRecord(
