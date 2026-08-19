@@ -5,6 +5,7 @@ def test_sqlite_queue_claim_renew_complete(tmp_path):
     queue = SQLiteIngestionQueue(tmp_path / "queue.db")
     job = queue.enqueue("doc-1", "file", "/data/doc.md", max_attempts=3)
 
+    assert queue.active_for_document("doc-1") is True
     claimed = queue.claim_next("worker-a", lease_seconds=60)
     assert claimed is not None
     assert claimed.id == job.id
@@ -17,6 +18,7 @@ def test_sqlite_queue_claim_renew_complete(tmp_path):
     assert queue.complete(job.id, "worker-b") is False
     assert queue.complete(job.id, "worker-a") is True
     assert queue.get(job.id).status == "completed"
+    assert queue.active_for_document("doc-1") is False
 
 
 def test_sqlite_queue_retries_then_fails(tmp_path):
@@ -60,3 +62,24 @@ def test_sqlite_queue_is_fifo(tmp_path):
     assert claimed is not None
     assert claimed.id == first.id
     assert claimed.id != second.id
+
+
+def test_sqlite_queue_reaps_terminal_expired_lease(tmp_path):
+    queue = SQLiteIngestionQueue(tmp_path / "queue.db")
+    job = queue.enqueue("doc-expired", "file", "/data/expired.txt", max_attempts=1)
+    claimed = queue.claim_next("worker-a", lease_seconds=60)
+    assert claimed is not None
+
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE ingestion_jobs SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+            (job.id,),
+        )
+        conn.commit()
+
+    changed = queue.reap_expired()
+    assert len(changed) == 1
+    assert changed[0].id == job.id
+    assert changed[0].status == "failed"
+    assert changed[0].error == "job lease expired"
+    assert queue.active_for_document("doc-expired") is False
