@@ -141,15 +141,23 @@ class TenantIngestionQueue:
 
     def enqueue(
         self,
-        tenant_id: str,
         document_id: str,
         source_type: str,
         source_uri: str,
         max_attempts: int = 3,
+        *,
+        tenant_id: str | None = None,
     ) -> IngestionJobRecord:
+        """Queue a job while preserving the pre-tenant positional API.
+
+        Authenticated API callers pass tenant_id explicitly as a keyword. Internal legacy
+        callers that omit it migrate to the configured default tenant, matching the
+        documented single-tenant compatibility policy.
+        """
+        effective_tenant = tenant_id or self.default_tenant_id
         job = self.base.enqueue(document_id, source_type, source_uri, max_attempts)
-        self._bind(job.id, tenant_id)
-        job.tenant_id = tenant_id
+        self._bind(job.id, effective_tenant)
+        job.tenant_id = effective_tenant
         return job
 
     def get(self, job_id: str, tenant_id: str | None = None) -> IngestionJobRecord | None:
