@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.core.config import Settings, get_settings
-from app.core.security import Principal, require_scopes
+from app.core.security import Principal, require_scopes, validate_zworkforce_context
 from app.ingestion_service import index_document
 from app.models.schemas import (
     AuditRecord,
@@ -33,7 +33,12 @@ from app.store_factory import document_store, ingestion_queue, security_store
 from app.upload_security import UploadSecurity, UploadSecurityError
 
 router = APIRouter()
-read_secure = APIRouter(dependencies=[Depends(require_scopes("knowledge:read"))])
+read_secure = APIRouter(
+    dependencies=[
+        Depends(require_scopes("knowledge:read")),
+        Depends(validate_zworkforce_context),
+    ]
+)
 write_secure = APIRouter(dependencies=[Depends(require_scopes("knowledge:write"))])
 
 
