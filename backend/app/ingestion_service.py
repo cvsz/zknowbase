@@ -27,11 +27,12 @@ async def index_document(
         chunks,
         vectors,
     )
+    docs = document_store(settings)
     record.status = "ready"
     record.chunk_count = len(chunks)
-    record.updated_at = document_store(settings).now()
+    record.updated_at = docs.now()
     record.error = None
-    return document_store(settings).upsert(record)
+    return docs.upsert(record)
 
 
 async def process_ingestion_job(
