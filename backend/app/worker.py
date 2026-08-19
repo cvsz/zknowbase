@@ -21,6 +21,36 @@ async def _heartbeat(queue, job_id: str, worker_id: str, lease_seconds: int) -> 
             raise RuntimeError("Ingestion job lease ownership was lost")
 
 
+def _reap_and_reconcile(queue, settings) -> None:
+    docs = document_store(settings)
+    for job in queue.reap_expired():
+        record = docs.get(job.document_id)
+        if record is None:
+            continue
+        if job.status == "failed" and not queue.active_for_document(job.document_id):
+            record.status = "failed"
+            record.error = job.error or "job lease expired"
+            record.updated_at = docs.now()
+            docs.upsert(record)
+            logger.error(
+                "ingestion_lease_expired_terminal job_id=%s document_id=%s",
+                job.id,
+                job.document_id,
+            )
+        elif job.status == "queued":
+            record.status = "queued"
+            record.error = "worker lease expired; retry queued"
+            record.updated_at = docs.now()
+            docs.upsert(record)
+            logger.warning(
+                "ingestion_lease_expired_requeued job_id=%s document_id=%s attempt=%s/%s",
+                job.id,
+                job.document_id,
+                job.attempts,
+                job.max_attempts,
+            )
+
+
 async def _run_job(queue, job, worker_id: str, settings) -> None:
     processing = asyncio.create_task(process_ingestion_job(job, settings))
     heartbeat = asyncio.create_task(
@@ -83,6 +113,7 @@ async def run_worker() -> None:
         settings.metadata_backend,
     )
     while True:
+        _reap_and_reconcile(queue, settings)
         job = queue.claim_next(worker_id, settings.worker_lease_seconds)
         if job is None:
             await asyncio.sleep(settings.worker_poll_seconds)
