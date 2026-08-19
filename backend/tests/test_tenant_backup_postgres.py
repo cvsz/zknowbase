@@ -31,6 +31,7 @@ def test_postgres_backup_preserves_tenant_mapping_tables(tmp_path):
     )
     key = None
     job = None
+    audit = None
     try:
         key, _secret = security.create_key(
             f"backup-{uuid4().hex[:8]}",
@@ -41,6 +42,14 @@ def test_postgres_backup_preserves_tenant_mapping_tables(tmp_path):
             f"doc-{uuid4().hex[:8]}",
             "url",
             "https://example.invalid/policy",
+            tenant_id=tenant_id,
+        )
+        audit = security.audit(
+            "bootstrap",
+            "bootstrap",
+            "service_key.rotate",
+            key.id,
+            "success",
             tenant_id=tenant_id,
         )
         settings = Settings(
@@ -64,8 +73,15 @@ def test_postgres_backup_preserves_tenant_mapping_tables(tmp_path):
             row["job_id"] == job.id and row["tenant_id"] == tenant_id
             for row in tables["ingestion_job_tenants"]
         )
+        assert any(
+            row["audit_id"] == audit.id and row["tenant_id"] == tenant_id
+            for row in tables["security_audit_tenants"]
+        )
     finally:
         with pool.connection() as conn:
+            if audit is not None:
+                conn.execute("DELETE FROM security_audit_tenants WHERE audit_id=%s", (audit.id,))
+                conn.execute("DELETE FROM security_audit WHERE id=%s", (audit.id,))
             if job is not None:
                 conn.execute("DELETE FROM ingestion_job_tenants WHERE job_id=%s", (job.id,))
                 conn.execute("DELETE FROM ingestion_jobs WHERE id=%s", (job.id,))
@@ -85,4 +101,5 @@ def test_postgres_restore_contract_accepts_legacy_archives_without_tenant_tables
     assert backup.POSTGRES_TABLES == backup.POSTGRES_REQUIRED_TABLES + (
         "service_key_tenants",
         "ingestion_job_tenants",
+        "security_audit_tenants",
     )
