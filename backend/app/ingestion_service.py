@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.core.config import Settings
+from app.core.file_security import scan_upload
 from app.models.schemas import DocumentRecord, IngestionJobRecord
 from app.rag.chunking import split_text
 from app.rag.loaders import fetch_url_text, parse_bytes
@@ -58,6 +59,7 @@ async def process_ingestion_job(
         if not path.is_file():
             raise ValueError("Queued document source file is unavailable")
         data = path.read_bytes()
+        await scan_upload(path.name, data, settings)
         text = parse_bytes(path.name, data)
         record.size_bytes = len(data)
     else:
