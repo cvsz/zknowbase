@@ -170,9 +170,11 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] zknowbase validates versioned governed retrieval context on the authenticated `knowledge:read` API boundary
 - [x] authenticated service-key tenant remains authoritative; consumer tenant metadata cannot override it
 - [x] malformed, incomplete, cross-tenant, or request-ID-inconsistent governed context fails closed
-- [ ] `cvsz/zworkforce` read-only `knowledge_search` / `knowledge_ask` tools merged to consumer `main`
-- [ ] consumer integration proven green under zworkforce branch protection and required reviewer policy
-- [ ] cross-repository release evidence records both final SHAs and least-privilege credential configuration
+- [x] `cvsz/zworkforce` read-only `knowledge_search` / `knowledge_ask` tools merged to consumer `main`
+- [x] consumer integration proven green under zworkforce branch protection and required reviewer policy
+- [x] cross-repository release evidence records both final SHAs and least-privilege credential configuration
+
+Evidence: zworkforce PR #168 (`feat: route zknowbase through governed knowledge tools`) merged to consumer `main` as `00b1aa3db1c9da15e8eb4e635b455181d1c03213`. The integration uses server-side tenant-bound `knowledge:read` credentials, ToolExecutor grants, governed tenant/actor/agent/tool/policy/request/trace context, cross-tenant response rejection, and no direct agent Qdrant path. The corresponding zknowbase release-evidence baseline is `b35f32513932aa76fe59265911f829d3cea2e5d4` before this documentation-only reconciliation.
 
 ### S17 — Production release evidence
 - [x] real Postgres integration is exercised in CI
@@ -195,8 +197,8 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] Tenant-isolated shared Qdrant storage and explicit encryption policy (chosen over per-tenant collections after enforcing authenticated-principal tenant payload boundaries).
 - [x] OpenTelemetry traces/metrics and local SLO dashboards.
 - [x] Backup/restore runbook for SQLite/Postgres and Qdrant snapshots.
-- [ ] zworkforce native module wiring after consumer-side interface review.
-- [ ] documentation-audit, cross-repository integration, and release evidence.
+- [x] zworkforce native module wiring after consumer-side interface review.
+- [ ] documentation-audit and final release evidence.
 
 ## Acceptance gates
 - `pytest` backend tests green.
