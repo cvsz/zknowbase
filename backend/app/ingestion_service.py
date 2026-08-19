@@ -45,6 +45,8 @@ async def process_ingestion_job(
     record = docs.get(job.document_id)
     if record is None:
         raise ValueError(f"Document {job.document_id} no longer exists")
+    if record.tenant_id != job.tenant_id:
+        raise ValueError("Ingestion job tenant ownership does not match document tenant")
 
     record.status = "processing"
     record.error = None
