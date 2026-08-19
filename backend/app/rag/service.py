@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 
 from app.core.config import Settings
 from app.models.schemas import QueryResponse, SourceCitation
+from app.observability import QUERY_DURATION, SEARCH_DURATION, timed, tracer
 from app.rag.hybrid import rerank_hybrid
 from app.rag.providers import AIProviders
 from app.rag.vector_store import VectorStore
@@ -25,17 +26,24 @@ class RAGService:
         top_k: int,
         filters: dict | None = None,
     ) -> list[SourceCitation]:
-        query_vector = (await self.providers.embed([query]))[0]
-        if self.settings.retrieval_mode == "dense":
-            return await self.vectors.search(tenant_id, query_vector, top_k, filters)
-        candidate_limit = max(top_k, min(100, top_k * self.settings.hybrid_candidate_multiplier))
-        candidates = await self.vectors.search(tenant_id, query_vector, candidate_limit, filters)
-        return rerank_hybrid(
-            query,
-            candidates,
-            top_k,
-            dense_weight=self.settings.hybrid_dense_weight,
-        )
+        with tracer("zknowbase.rag").start_as_current_span("rag.search") as span, timed(SEARCH_DURATION):
+            span.set_attribute("tenant.id", tenant_id)
+            span.set_attribute("rag.top_k", top_k)
+            query_vector = (await self.providers.embed([query]))[0]
+            if self.settings.retrieval_mode == "dense":
+                return await self.vectors.search(tenant_id, query_vector, top_k, filters)
+            candidate_limit = max(
+                top_k, min(100, top_k * self.settings.hybrid_candidate_multiplier)
+            )
+            candidates = await self.vectors.search(
+                tenant_id, query_vector, candidate_limit, filters
+            )
+            return rerank_hybrid(
+                query,
+                candidates,
+                top_k,
+                dense_weight=self.settings.hybrid_dense_weight,
+            )
 
     @staticmethod
     def _prompt(question: str, sources: list[SourceCitation]) -> str:
@@ -52,9 +60,12 @@ class RAGService:
         top_k: int,
         filters: dict | None = None,
     ) -> QueryResponse:
-        sources = await self.search(tenant_id, question, top_k, filters)
-        answer = await self.providers.complete(SYSTEM_PROMPT, self._prompt(question, sources))
-        return QueryResponse(answer=answer, sources=sources)
+        with tracer("zknowbase.rag").start_as_current_span("rag.answer") as span, timed(QUERY_DURATION):
+            span.set_attribute("tenant.id", tenant_id)
+            sources = await self.search(tenant_id, question, top_k, filters)
+            answer = await self.providers.complete(SYSTEM_PROMPT, self._prompt(question, sources))
+            span.set_attribute("rag.source_count", len(sources))
+            return QueryResponse(answer=answer, sources=sources)
 
     async def answer_stream(
         self,
