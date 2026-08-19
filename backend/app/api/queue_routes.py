@@ -11,6 +11,7 @@ from app.models.schemas import (
     IngestionJobRecord,
     UrlIngestRequest,
 )
+from app.rag.loaders import ALLOWED_SUFFIXES
 from app.store_factory import document_store, ingestion_queue
 
 router = APIRouter()
@@ -26,14 +27,17 @@ async def enqueue_file(
     file: UploadFile = File(...),
     settings: Settings = Depends(get_settings),
 ) -> AsyncIngestResponse:
+    filename = Path(file.filename or "upload").name
+    suffix = Path(filename).suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(415, f"Unsupported file type: {suffix or 'unknown'}")
+
     max_bytes = settings.max_upload_mb * 1024 * 1024
     data = await file.read(max_bytes + 1)
     if len(data) > max_bytes:
         raise HTTPException(413, "File exceeds upload limit")
 
-    filename = Path(file.filename or "upload").name
     doc_id = str(uuid4())
-    suffix = Path(filename).suffix.lower()
     saved = settings.upload_dir / f"{doc_id}{suffix}"
     docs = document_store(settings)
     queue = ingestion_queue(settings)
