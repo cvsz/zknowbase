@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from psycopg_pool import ConnectionPool
 
@@ -47,7 +48,7 @@ def _postgres_ingestion_queue(
 
 @lru_cache(maxsize=8)
 def _sqlite_ingestion_queue(db_path: str) -> SQLiteIngestionQueue:
-    return SQLiteIngestionQueue(__import__("pathlib").Path(db_path))
+    return SQLiteIngestionQueue(Path(db_path))
 
 
 def document_store(settings: Settings):
