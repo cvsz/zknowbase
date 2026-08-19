@@ -117,6 +117,21 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] service key remains server-side and is injected only after human session authorization
 - [x] Node auth regression tests run in CI without extra runtime dependencies
 
+### S11 — Local hybrid retrieval
+- [x] dependency-free BM25 scoring over bounded dense candidates
+- [x] Qdrant remains authoritative for filters and collection boundaries
+- [x] configurable dense/hybrid retrieval mode
+- [x] configurable candidate multiplier and dense/lexical fusion weight
+- [x] unit coverage for lexical promotion, top-k, and empty candidate behavior
+
+### S12 — Backup/restore operational recovery
+- [x] SQLite/Postgres metadata backup paths
+- [x] uploaded-file archive with integrity manifest
+- [x] Qdrant snapshot capture/restore with major/minor compatibility guard
+- [x] owner-only backup archive permissions
+- [x] pre-restore safety backup by default
+- [x] operator runbook with verification, isolated restore drill, RPO/RTO evidence checklist
+
 ## Production hardening backlog
 - [x] Replace single API key with scoped service keys + rotation/audit table.
 - [x] Optional local Postgres metadata backend for HA/multi-replica deployments.
@@ -124,10 +139,10 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] Malware scanning / active-content rejection before parsing untrusted uploads using self-hosted tools.
 - [x] Local Admin UI human authentication + viewer/admin RBAC without mandatory SaaS identity.
 - [ ] Optional OIDC login adapter for self-hosted identity providers.
-- [ ] Hybrid BM25+dense retrieval + local reranker.
+- [x] Hybrid BM25+dense retrieval + local reranker.
 - [ ] Per-tenant collections and encryption policy.
 - [ ] OpenTelemetry traces/metrics and local SLO dashboards.
-- [ ] Backup/restore runbook for SQLite/Postgres and Qdrant snapshots.
+- [x] Backup/restore runbook for SQLite/Postgres and Qdrant snapshots.
 - [ ] zworkforce native module wiring after consumer-side interface review.
 
 ## Acceptance gates
