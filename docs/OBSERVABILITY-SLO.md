@@ -48,14 +48,15 @@ Streaming query latency measures the complete stream lifetime. Provider and Qdra
 
 ## Local startup
 
-Set the normal required zknowbase secrets, then enable trace export and start the optional profile:
+Set the normal required zknowbase secrets, provide a Grafana admin password, then enable trace export and start the optional profile:
 
 ```bash
+export ZKB_GRAFANA_ADMIN_PASSWORD='replace-with-a-strong-local-secret'
 export ZKB_OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 docker compose --profile observability up --build
 ```
 
-Prometheus is exposed on port `9090`; Grafana is exposed on port `3001` with an anonymous Viewer role intended for a trusted local/operator network only. Do not publish either endpoint directly to an untrusted network. The provisioned `zknowbase Local SLO Overview` dashboard covers API rate/latency, retrieval/provider latency, ingestion backlog/failures, authentication denials, and Qdrant errors.
+Prometheus is exposed on port `9090`; Grafana is exposed on port `3001` with anonymous access disabled. Do not publish Prometheus, Grafana, the Collector, or `/metrics` directly to an untrusted network without an operator-controlled reverse proxy/firewall and authentication policy. The provisioned `zknowbase Local SLO Overview` dashboard covers API rate/latency, retrieval/provider latency, ingestion backlog/failures, authentication denials, and Qdrant errors.
 
 ## Operational review
 
