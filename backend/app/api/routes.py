@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core.config import Settings, get_settings
 from app.core.security import Principal, require_scopes
+from app.ingestion_service import index_document
 from app.models.schemas import (
     AuditRecord,
     ChunkPreview,
@@ -26,10 +27,9 @@ from app.models.schemas import (
 )
 from app.rag.chunking import split_text
 from app.rag.loaders import fetch_url_text, parse_bytes
-from app.rag.providers import AIProviders
 from app.rag.service import RAGService
 from app.rag.vector_store import VectorStore
-from app.store_factory import document_store, security_store
+from app.store_factory import document_store, ingestion_queue, security_store
 
 router = APIRouter()
 read_secure = APIRouter(dependencies=[Depends(require_scopes("knowledge:read"))])
@@ -40,27 +40,13 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def _index(record: DocumentRecord, text: str, settings: Settings) -> DocumentRecord:
-    chunks = split_text(text, settings)
-    if not chunks:
-        raise ValueError("No extractable text found")
-    vectors = await AIProviders(settings).embed(chunks)
-    vector_store = VectorStore(settings)
-    await vector_store.delete_document(record.id)
-    await vector_store.upsert_chunks(record.id, record.name, record.source_uri, chunks, vectors)
-    record.status = "ready"
-    record.chunk_count = len(chunks)
-    record.updated_at = utcnow()
-    record.error = None
-    return document_store(settings).upsert(record)
-
-
 @router.get("/health", response_model=HealthResponse)
 async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
     qdrant_ok = await VectorStore(settings).healthy()
     try:
         document_store(settings).list()
         security_store(settings).list_keys()
+        ingestion_queue(settings).list(1)
         db = "ok"
     except Exception:
         db = "error"
@@ -92,16 +78,17 @@ async def ingest_file(
         created_at=now,
         updated_at=now,
     )
-    document_store(settings).upsert(record)
+    docs = document_store(settings)
+    docs.upsert(record)
     try:
         text = parse_bytes(filename, data)
         saved = settings.upload_dir / f"{doc_id}{Path(filename).suffix.lower()}"
         saved.write_bytes(data)
         record.source_uri = str(saved)
-        record = await _index(record, text, settings)
+        record = await index_document(record, text, settings)
     except Exception as exc:
         record.status, record.error, record.updated_at = "failed", str(exc), utcnow()
-        document_store(settings).upsert(record)
+        docs.upsert(record)
         raise HTTPException(422, f"Ingestion failed: {exc}") from exc
     return IngestResponse(document=record)
 
@@ -123,15 +110,16 @@ async def ingest_url(
         created_at=now,
         updated_at=now,
     )
-    document_store(settings).upsert(record)
+    docs = document_store(settings)
+    docs.upsert(record)
     try:
         text, content_type = await fetch_url_text(url, settings)
         record.content_type = content_type
         record.size_bytes = len(text.encode())
-        record = await _index(record, text, settings)
+        record = await index_document(record, text, settings)
     except Exception as exc:
         record.status, record.error, record.updated_at = "failed", str(exc), utcnow()
-        document_store(settings).upsert(record)
+        docs.upsert(record)
         raise HTTPException(422, f"URL ingestion failed: {exc}") from exc
     return IngestResponse(document=record)
 
@@ -167,6 +155,9 @@ async def delete_document(
     doc_id: str,
     settings: Settings = Depends(get_settings),
 ) -> None:
+    queue = ingestion_queue(settings)
+    if queue.active_for_document(doc_id):
+        raise HTTPException(409, "Document has an active ingestion job")
     docs = document_store(settings)
     record = docs.get(doc_id)
     if not record:
@@ -182,6 +173,9 @@ async def reindex_document(
     doc_id: str,
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:
+    queue = ingestion_queue(settings)
+    if queue.active_for_document(doc_id):
+        raise HTTPException(409, "Document has an active ingestion job")
     docs = document_store(settings)
     record = docs.get(doc_id)
     if not record:
@@ -196,7 +190,7 @@ async def reindex_document(
             raise ValueError("Document source is unavailable")
         record.status, record.updated_at = "processing", utcnow()
         docs.upsert(record)
-        record = await _index(record, text, settings)
+        record = await index_document(record, text, settings)
     except Exception as exc:
         record.status, record.error, record.updated_at = "failed", str(exc), utcnow()
         docs.upsert(record)
