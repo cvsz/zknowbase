@@ -88,7 +88,6 @@ class HealthResponse(BaseModel):
 
 class ServiceKeyCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    tenant_id: str = Field(default="default", min_length=1, max_length=63, pattern=TENANT_ID_PATTERN)
     scopes: list[ServiceKeyScope] = Field(min_length=1, max_length=4)
     expires_at: datetime | None = None
 
