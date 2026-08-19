@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_key: str = Field(default="change-me-long-random-secret", min_length=16)
     bootstrap_api_key_enabled: bool = True
+    default_tenant_id: str = Field(default="default", pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
     frontend_origin: str = "http://localhost:3000"
 
     qdrant_url: str = "http://localhost:6333"
