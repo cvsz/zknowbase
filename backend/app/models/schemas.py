@@ -10,6 +10,8 @@ ServiceKeyScope = Literal[
     "audit:read",
 ]
 
+IngestionJobStatus = Literal["queued", "processing", "completed", "failed", "cancelled"]
+
 
 class DocumentRecord(BaseModel):
     id: str
@@ -114,3 +116,23 @@ class AuditRecord(BaseModel):
     outcome: str
     detail: str | None = None
     created_at: datetime
+
+
+class IngestionJobRecord(BaseModel):
+    id: str
+    document_id: str
+    source_type: Literal["file", "url"]
+    source_uri: str
+    status: IngestionJobStatus
+    attempts: int = 0
+    max_attempts: int = 3
+    worker_id: str | None = None
+    lease_expires_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    error: str | None = None
+
+
+class AsyncIngestResponse(BaseModel):
+    document: DocumentRecord
+    job: IngestionJobRecord
