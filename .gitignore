@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+backend/data/
+frontend/.next/
+frontend/node_modules/
+.DS_Store
+coverage.xml
+htmlcov/
