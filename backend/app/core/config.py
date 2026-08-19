@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     postgres_pool_min_size: int = Field(default=1, ge=1, le=50)
     postgres_pool_max_size: int = Field(default=10, ge=1, le=100)
     upload_dir: Path = Path("data/uploads")
+    backup_dir: Path = Path("data/backups")
+    maintenance_lock_path: Path = Path("data/.mutation.lock")
     max_upload_mb: int = 25
     max_url_bytes: int = 5_000_000
     chunk_size: int = 1000
@@ -68,6 +70,8 @@ class Settings(BaseSettings):
         if self.metadata_backend == "sqlite":
             self.metadata_db.parent.mkdir(parents=True, exist_ok=True)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
+        self.maintenance_lock_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache
