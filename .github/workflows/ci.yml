@@ -57,6 +57,49 @@ jobs:
       - run: python -m ruff check app tests
       - run: python -m pytest -q
 
+  performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.15.1
+        ports:
+          - 6333:6333
+        options: >-
+          --health-cmd "bash -c '</dev/tcp/127.0.0.1/6333'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PYTHONPATH: .
+      ZKB_TEST_QDRANT_URL: http://127.0.0.1:6333
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Run bounded Qdrant load benchmark
+        run: >-
+          python scripts/benchmark_qdrant.py
+          --points 512
+          --requests 200
+          --concurrency 8
+          --vector-size 32
+          --max-p95-seconds 2.0
+          --output performance-report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qdrant-performance-${{ github.sha }}
+          path: backend/performance-report.json
+          if-no-files-found: error
+          retention-days: 30
+
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
