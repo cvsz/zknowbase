@@ -45,7 +45,8 @@ async def request_observability(request: Request, call_next):
             status_code = response.status_code
             return response
         finally:
-            route = getattr(request.scope.get("route"), "path", request.url.path)
+            matched_route = request.scope.get("route")
+            route = getattr(matched_route, "path", "__unmatched__")
             elapsed = time.perf_counter() - started
             HTTP_REQUESTS.labels(request.method, route, str(status_code)).inc()
             HTTP_DURATION.labels(request.method, route).observe(elapsed)
