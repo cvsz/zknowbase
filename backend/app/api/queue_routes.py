@@ -59,11 +59,11 @@ async def enqueue_file(
         saved.write_bytes(data)
         docs.upsert(record)
         job = queue.enqueue(
-            principal.tenant_id,
             record.id,
             "file",
             str(saved),
             settings.ingestion_job_max_attempts,
+            tenant_id=principal.tenant_id,
         )
     except Exception as exc:
         saved.unlink(missing_ok=True)
@@ -100,11 +100,11 @@ def enqueue_url(
     try:
         docs.upsert(record)
         job = queue.enqueue(
-            principal.tenant_id,
             record.id,
             "url",
             url,
             settings.ingestion_job_max_attempts,
+            tenant_id=principal.tenant_id,
         )
     except Exception as exc:
         docs.delete(record.id)
