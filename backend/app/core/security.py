@@ -5,7 +5,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 
 from app.core.config import Settings, get_settings
-from app.security_store import SecurityStore
+from app.store_factory import security_store
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -22,16 +22,12 @@ class Principal:
         return "*" in self.scopes or scope in self.scopes
 
 
-def _security_store(settings: Settings) -> SecurityStore:
-    return SecurityStore(settings.metadata_db)
-
-
 def authenticate_principal(
     request: Request,
     supplied: str | None = Depends(api_key_header),
     settings: Settings = Depends(get_settings),
 ) -> Principal:
-    store = _security_store(settings)
+    store = security_store(settings)
     resource = f"{request.method} {request.url.path}"
 
     if not supplied:
@@ -56,7 +52,7 @@ def authenticate_principal(
     if key is None:
         store.audit(
             None,
-            SecurityStore.token_prefix(supplied),
+            store.token_prefix(supplied),
             "authenticate",
             resource,
             "denied",
@@ -85,7 +81,7 @@ def require_scopes(*required: str):
     ) -> Principal:
         missing = [scope for scope in required if not principal.has_scope(scope)]
         if missing:
-            _security_store(settings).audit(
+            security_store(settings).audit(
                 principal.id,
                 principal.key_prefix,
                 "authorize",

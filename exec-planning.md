@@ -1,16 +1,23 @@
 # zknowbase — Execution Planning
 
 ## Mission
-Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/zworkforce`.
+Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/zworkforce` with a **local-first / zero recurring API cost** default architecture.
+
+## Hard constraints
+1. Default runtime must work fully offline after model images/artifacts are present.
+2. Default stack must not require paid SaaS, managed databases, or paid model APIs.
+3. Ollama, Qdrant, SQLite, local files, Docker/Compose are the baseline path.
+4. Cloud model providers remain optional adapters only and are never required for core functionality.
+5. Optional Postgres must run locally/self-hosted; SQLite remains the default for a single-node deployment.
 
 ## Architecture principles
 1. API-first boundary: zworkforce never reaches the vector DB directly.
 2. Fail closed: API key required for all `/api/v1/*` endpoints except health/readiness.
 3. Provider isolation: embeddings and LLMs are adapters; ingestion/retrieval are provider-agnostic.
-4. Durable metadata: document lifecycle lives in SQLite; vectors live in Qdrant.
+4. Durable metadata: SQLite by default; optional local Postgres for multi-replica/HA; vectors live in Qdrant.
 5. Traceable answers: every answer returns source chunks, document IDs, and relevance scores.
 6. Safe ingestion: bounded uploads, explicit content types, SSRF-resistant URL ingestion, bounded response size.
-7. Local-first: Qdrant + Ollama run in Docker; OpenAI-compatible, Anthropic, and Gemini LLM adapters are configurable.
+7. Local-first inference: Qdrant + Ollama run in Docker; OpenAI, Anthropic, and Gemini are opt-in only.
 8. Idempotent lifecycle: deleting/reindexing a document also reconciles vectors.
 9. Least privilege: generated service keys are scoped, revocable/rotatable, and never persisted in plaintext.
 
@@ -60,15 +67,25 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - [x] bootstrap/root key can be disabled after provisioning
 - [x] separate server-side Admin UI credential
 
+### S7 — Local metadata scale-out
+- [x] SQLite remains zero-cost single-node default
+- [x] optional local Postgres metadata backend
+- [x] pooled Postgres connections for multi-replica application instances
+- [x] document lifecycle parity across SQLite/Postgres
+- [x] scoped-key/audit parity across SQLite/Postgres
+- [x] transaction-safe service-key rotation in Postgres
+- [x] optional Docker Compose `ha` profile for local Postgres
+- [x] CI integration test against real Postgres service
+
 ## Production hardening backlog
 - [x] Replace single API key with scoped service keys + rotation/audit table.
-- [ ] Postgres metadata backend for HA/multi-replica deployments.
-- [ ] Queue-backed asynchronous ingestion for very large corpora.
-- [ ] Malware scanning / CDR before parsing untrusted uploads.
-- [ ] OIDC/RBAC for Admin UI.
-- [ ] Hybrid BM25+dense retrieval + reranker.
+- [x] Optional local Postgres metadata backend for HA/multi-replica deployments.
+- [ ] Queue-backed asynchronous ingestion for very large corpora using a local broker/runtime.
+- [ ] Malware scanning / CDR before parsing untrusted uploads using self-hosted tools.
+- [ ] Local/OIDC-compatible RBAC for Admin UI without mandatory SaaS identity dependency.
+- [ ] Hybrid BM25+dense retrieval + local reranker.
 - [ ] Per-tenant collections and encryption policy.
-- [ ] OpenTelemetry traces/metrics and SLO dashboards.
+- [ ] OpenTelemetry traces/metrics and local SLO dashboards.
 - [ ] Backup/restore runbook for SQLite/Postgres and Qdrant snapshots.
 - [ ] zworkforce native module wiring after consumer-side interface review.
 
@@ -76,10 +93,12 @@ Build a production-oriented, self-hostable AI Knowledge Base consumed by `cvsz/z
 - `pytest` backend tests green.
 - Python syntax/import validation green.
 - Frontend `npm run build` green.
-- Docker Compose config validates.
+- Docker Compose default and optional `ha` profile validate.
+- Postgres integration test runs against an actual local Postgres service in CI.
 - No secrets committed.
 - Missing/invalid/revoked/expired keys fail closed.
 - Read-only service keys cannot mutate documents.
 - Service-key plaintext is never persisted and rotation revokes the old key atomically.
 - Query citations contain document/chunk identity.
 - Delete removes both metadata and vectors.
+- Default runtime requires no paid API or managed service.

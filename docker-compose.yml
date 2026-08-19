@@ -36,6 +36,24 @@ services:
     command: ["ollama pull nomic-embed-text && ollama pull qwen2.5:3b"]
     restart: "no"
 
+  # Optional local HA metadata profile. The default stack remains SQLite and
+  # requires no database service or paid/managed infrastructure.
+  postgres:
+    image: postgres:17-alpine
+    profiles: ["ha"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zknowbase
+      POSTGRES_USER: zknowbase
+      POSTGRES_PASSWORD: ${ZKB_POSTGRES_PASSWORD:-zknowbase-local-only}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zknowbase -d zknowbase"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   backend:
     build: ./backend
     restart: unless-stopped
@@ -50,7 +68,11 @@ services:
       ZKB_BOOTSTRAP_API_KEY_ENABLED: ${ZKB_BOOTSTRAP_API_KEY_ENABLED:-true}
       ZKB_FRONTEND_ORIGIN: http://localhost:3000
       ZKB_QDRANT_URL: http://qdrant:6333
+      ZKB_METADATA_BACKEND: ${ZKB_METADATA_BACKEND:-sqlite}
       ZKB_METADATA_DB: /data/zknowbase.db
+      ZKB_POSTGRES_URL: ${ZKB_POSTGRES_URL:-}
+      ZKB_POSTGRES_POOL_MIN_SIZE: ${ZKB_POSTGRES_POOL_MIN_SIZE:-1}
+      ZKB_POSTGRES_POOL_MAX_SIZE: ${ZKB_POSTGRES_POOL_MAX_SIZE:-10}
       ZKB_UPLOAD_DIR: /data/uploads
       ZKB_EMBEDDING_PROVIDER: ${ZKB_EMBEDDING_PROVIDER:-ollama}
       ZKB_EMBEDDING_MODEL: ${ZKB_EMBEDDING_MODEL:-nomic-embed-text}
@@ -81,3 +103,4 @@ volumes:
   qdrant_data:
   ollama_data:
   backend_data:
+  postgres_data:

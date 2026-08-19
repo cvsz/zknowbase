@@ -16,11 +16,26 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: zknowbase
+          POSTGRES_USER: zknowbase
+          POSTGRES_PASSWORD: zknowbase
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zknowbase -d zknowbase"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend
     env:
       PYTHONPATH: .
+      ZKB_TEST_POSTGRES_URL: postgresql://zknowbase:zknowbase@127.0.0.1:5432/zknowbase
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -56,3 +71,4 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: docker compose config --quiet
+      - run: docker compose --profile ha config --quiet

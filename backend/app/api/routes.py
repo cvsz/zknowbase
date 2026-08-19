@@ -1,8 +1,9 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.core.config import Settings, get_settings
@@ -28,20 +29,15 @@ from app.rag.loaders import fetch_url_text, parse_bytes
 from app.rag.providers import AIProviders
 from app.rag.service import RAGService
 from app.rag.vector_store import VectorStore
-from app.security_store import SecurityStore
-from app.store import DocumentStore
+from app.store_factory import document_store, security_store
 
 router = APIRouter()
 read_secure = APIRouter(dependencies=[Depends(require_scopes("knowledge:read"))])
 write_secure = APIRouter(dependencies=[Depends(require_scopes("knowledge:write"))])
 
 
-def store(settings: Settings) -> DocumentStore:
-    return DocumentStore(settings.metadata_db)
-
-
-def security_store(settings: Settings) -> SecurityStore:
-    return SecurityStore(settings.metadata_db)
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 async def _index(record: DocumentRecord, text: str, settings: Settings) -> DocumentRecord:
@@ -54,16 +50,16 @@ async def _index(record: DocumentRecord, text: str, settings: Settings) -> Docum
     await vector_store.upsert_chunks(record.id, record.name, record.source_uri, chunks, vectors)
     record.status = "ready"
     record.chunk_count = len(chunks)
-    record.updated_at = DocumentStore.now()
+    record.updated_at = utcnow()
     record.error = None
-    return store(settings).upsert(record)
+    return document_store(settings).upsert(record)
 
 
 @router.get("/health", response_model=HealthResponse)
 async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
     qdrant_ok = await VectorStore(settings).healthy()
     try:
-        store(settings).list()
+        document_store(settings).list()
         security_store(settings).list_keys()
         db = "ok"
     except Exception:
@@ -85,7 +81,7 @@ async def ingest_file(
         raise HTTPException(413, "File exceeds upload limit")
     filename = Path(file.filename or "upload").name
     doc_id = str(uuid4())
-    now = DocumentStore.now()
+    now = utcnow()
     record = DocumentRecord(
         id=doc_id,
         name=filename,
@@ -96,7 +92,7 @@ async def ingest_file(
         created_at=now,
         updated_at=now,
     )
-    store(settings).upsert(record)
+    document_store(settings).upsert(record)
     try:
         text = parse_bytes(filename, data)
         saved = settings.upload_dir / f"{doc_id}{Path(filename).suffix.lower()}"
@@ -104,8 +100,8 @@ async def ingest_file(
         record.source_uri = str(saved)
         record = await _index(record, text, settings)
     except Exception as exc:
-        record.status, record.error, record.updated_at = "failed", str(exc), DocumentStore.now()
-        store(settings).upsert(record)
+        record.status, record.error, record.updated_at = "failed", str(exc), utcnow()
+        document_store(settings).upsert(record)
         raise HTTPException(422, f"Ingestion failed: {exc}") from exc
     return IngestResponse(document=record)
 
@@ -117,7 +113,7 @@ async def ingest_url(
 ) -> IngestResponse:
     url = str(body.url)
     doc_id = str(uuid4())
-    now = DocumentStore.now()
+    now = utcnow()
     record = DocumentRecord(
         id=doc_id,
         name=url,
@@ -127,15 +123,15 @@ async def ingest_url(
         created_at=now,
         updated_at=now,
     )
-    store(settings).upsert(record)
+    document_store(settings).upsert(record)
     try:
         text, content_type = await fetch_url_text(url, settings)
         record.content_type = content_type
         record.size_bytes = len(text.encode())
         record = await _index(record, text, settings)
     except Exception as exc:
-        record.status, record.error, record.updated_at = "failed", str(exc), DocumentStore.now()
-        store(settings).upsert(record)
+        record.status, record.error, record.updated_at = "failed", str(exc), utcnow()
+        document_store(settings).upsert(record)
         raise HTTPException(422, f"URL ingestion failed: {exc}") from exc
     return IngestResponse(document=record)
 
@@ -163,7 +159,7 @@ async def preview(
 
 @read_secure.get("/documents", response_model=list[DocumentRecord])
 def list_documents(settings: Settings = Depends(get_settings)) -> list[DocumentRecord]:
-    return store(settings).list()
+    return document_store(settings).list()
 
 
 @write_secure.delete("/documents/{doc_id}", status_code=204)
@@ -171,13 +167,14 @@ async def delete_document(
     doc_id: str,
     settings: Settings = Depends(get_settings),
 ) -> None:
-    record = store(settings).get(doc_id)
+    docs = document_store(settings)
+    record = docs.get(doc_id)
     if not record:
         raise HTTPException(404, "Document not found")
     await VectorStore(settings).delete_document(doc_id)
     if record.source_type == "file" and record.source_uri:
         Path(record.source_uri).unlink(missing_ok=True)
-    store(settings).delete(doc_id)
+    docs.delete(doc_id)
 
 
 @write_secure.post("/documents/{doc_id}/reindex", response_model=IngestResponse)
@@ -185,7 +182,8 @@ async def reindex_document(
     doc_id: str,
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:
-    record = store(settings).get(doc_id)
+    docs = document_store(settings)
+    record = docs.get(doc_id)
     if not record:
         raise HTTPException(404, "Document not found")
     try:
@@ -196,12 +194,12 @@ async def reindex_document(
             text = parse_bytes(path.name, path.read_bytes())
         else:
             raise ValueError("Document source is unavailable")
-        record.status, record.updated_at = "processing", DocumentStore.now()
-        store(settings).upsert(record)
+        record.status, record.updated_at = "processing", utcnow()
+        docs.upsert(record)
         record = await _index(record, text, settings)
     except Exception as exc:
-        record.status, record.error, record.updated_at = "failed", str(exc), DocumentStore.now()
-        store(settings).upsert(record)
+        record.status, record.error, record.updated_at = "failed", str(exc), utcnow()
+        docs.upsert(record)
         raise HTTPException(422, f"Reindex failed: {exc}") from exc
     return IngestResponse(document=record)
 
@@ -242,7 +240,6 @@ async def query(
 @router.post("/service-keys", response_model=ServiceKeyCreateResponse, status_code=201)
 def create_service_key(
     body: ServiceKeyCreateRequest,
-    request: Request,
     principal: Principal = Depends(require_scopes("keys:admin")),
     settings: Settings = Depends(get_settings),
 ) -> ServiceKeyCreateResponse:
