@@ -178,6 +178,32 @@ services:
     volumes:
       - backend_data:/data
 
+  backup:
+    build: ./backend
+    profiles: ["ops"]
+    entrypoint: ["python", "-m", "app.backup"]
+    healthcheck:
+      disable: true
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      ZKB_ENVIRONMENT: production
+      ZKB_BOOTSTRAP_API_KEY_ENABLED: "false"
+      ZKB_QDRANT_URL: http://qdrant:6333
+      ZKB_QDRANT_COLLECTION: ${ZKB_QDRANT_COLLECTION:-zknowbase}
+      ZKB_METADATA_BACKEND: ${ZKB_METADATA_BACKEND:-sqlite}
+      ZKB_METADATA_DB: /data/zknowbase.db
+      ZKB_POSTGRES_URL: ${ZKB_POSTGRES_URL:-}
+      ZKB_POSTGRES_POOL_MIN_SIZE: ${ZKB_POSTGRES_POOL_MIN_SIZE:-1}
+      ZKB_POSTGRES_POOL_MAX_SIZE: ${ZKB_POSTGRES_POOL_MAX_SIZE:-10}
+      ZKB_UPLOAD_DIR: /data/uploads
+      ZKB_BACKUP_DIR: /data/backups
+      ZKB_MAINTENANCE_LOCK_PATH: /data/.mutation.lock
+      ZKB_BACKUP_REQUIRE_ENCRYPTION: ${ZKB_BACKUP_REQUIRE_ENCRYPTION:-false}
+    volumes:
+      - backend_data:/data
+
   frontend:
     build: ./frontend
     restart: unless-stopped
