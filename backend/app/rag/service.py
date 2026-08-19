@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 
 from app.core.config import Settings
 from app.models.schemas import QueryResponse, SourceCitation
+from app.rag.hybrid import rerank_hybrid
 from app.rag.providers import AIProviders
 from app.rag.vector_store import VectorStore
 
@@ -13,12 +14,22 @@ Prefer concise, operationally useful answers."""
 
 class RAGService:
     def __init__(self, settings: Settings):
+        self.settings = settings
         self.providers = AIProviders(settings)
         self.vectors = VectorStore(settings)
 
     async def search(self, query: str, top_k: int, filters: dict | None = None) -> list[SourceCitation]:
         query_vector = (await self.providers.embed([query]))[0]
-        return await self.vectors.search(query_vector, top_k, filters)
+        if self.settings.retrieval_mode == "dense":
+            return await self.vectors.search(query_vector, top_k, filters)
+        candidate_limit = max(top_k, min(100, top_k * self.settings.hybrid_candidate_multiplier))
+        candidates = await self.vectors.search(query_vector, candidate_limit, filters)
+        return rerank_hybrid(
+            query,
+            candidates,
+            top_k,
+            dense_weight=self.settings.hybrid_dense_weight,
+        )
 
     @staticmethod
     def _prompt(question: str, sources: list[SourceCitation]) -> str:
