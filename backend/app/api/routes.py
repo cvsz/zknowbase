@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
+from app.content_identity import file_document_id, sha256_content
 from app.core.config import Settings, get_settings
 from app.core.security import Principal, require_scopes, validate_zworkforce_context
 from app.ingestion_service import index_document
@@ -91,26 +92,32 @@ async def ingest_file(
     filename = Path(file.filename or "upload").name
     await _inspect_upload(filename, data, settings)
 
-    doc_id = str(uuid4())
+    content_hash = sha256_content(data)
+    doc_id = file_document_id(principal.tenant_id, content_hash)
+    docs = document_store(settings)
+    existing = docs.get(doc_id)
+    if existing is not None and existing.tenant_id == principal.tenant_id:
+        if existing.status not in {"failed", "cancelled"}:
+            return IngestResponse(document=existing)
+
     now = utcnow()
+    saved = settings.upload_dir / f"{doc_id}{Path(filename).suffix.lower()}"
     record = DocumentRecord(
         id=doc_id,
         name=filename,
         tenant_id=principal.tenant_id,
         source_type="file",
+        source_uri=str(saved),
         content_type=file.content_type,
         status="processing",
         size_bytes=len(data),
-        created_at=now,
+        created_at=existing.created_at if existing is not None else now,
         updated_at=now,
     )
-    docs = document_store(settings)
     docs.upsert(record)
     try:
         text = parse_bytes(filename, data)
-        saved = settings.upload_dir / f"{doc_id}{Path(filename).suffix.lower()}"
         saved.write_bytes(data)
-        record.source_uri = str(saved)
         record = await index_document(record, text, settings)
     except Exception as exc:
         record.status, record.error, record.updated_at = "failed", str(exc), utcnow()
