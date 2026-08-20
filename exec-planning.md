@@ -228,3 +228,116 @@ Release evidence: release-candidate commit `e9ea3d69fca21bf21b3323cd289f1b5edab3
 - Local observability does not require paid SaaS, does not expose document contents/secrets, and Grafana anonymous access remains disabled.
 - Governed zworkforce retrieval uses only the service API boundary and least-privilege `knowledge:read` credentials; agents never access Qdrant directly.
 - Default runtime requires no paid API, managed service, hosted identity, or external queue.
+
+## Post-v0.1.0 execution program
+
+`v0.1.0` is the completed production baseline. The slices below define the next evidence-driven development program toward `v0.2.0`. They are intentionally unchecked until code, tests, CI, operational evidence, and documentation prove completion. Every slice must preserve S1-S17 guarantees and the local-first / zero recurring API cost default.
+
+### S18 — Repository governance and release safety
+- [ ] enable repository rules/branch protection for `main` with pull-request-only changes
+- [ ] require current CI and Security workflow checks before merge
+- [ ] prevent force-push and branch deletion for `main`
+- [ ] define emergency/break-glass procedure without silently bypassing evidence requirements
+- [ ] add CODEOWNERS/reviewer ownership for backend security, frontend auth, operations, and release-sensitive paths where appropriate
+- [ ] document release/tag provenance and post-release hotfix procedure
+
+Acceptance: a deliberately failing PR cannot merge through the normal path, a green PR can merge, and the governance configuration is recorded as release evidence.
+
+### S19 — Native portable-backup confidentiality
+- [ ] add optional native authenticated encryption for portable backup archives using an established reviewed cryptographic library
+- [ ] keep the default runtime self-hosted with no hosted KMS dependency
+- [ ] load backup keys from operator-controlled secret files or equivalent server-side secret boundary; never from browser/public environment variables
+- [ ] use a versioned envelope and fresh nonce/IV per archive
+- [ ] bound encryption/decryption memory usage for large backups
+- [ ] authenticate/decrypt completely before archive parsing or destructive restore mutation
+- [ ] fail closed on wrong key, corruption, truncation, insecure key-file permissions, and plaintext archives when encryption is required
+- [ ] preserve tenant key/job/audit ownership and legacy backup compatibility according to explicit migration policy
+- [ ] add encrypted backup/verify/restore and negative security regression tests
+- [ ] update encryption and DR documentation with rotation/escrow/retention procedures
+
+Acceptance: an encrypted archive exposes no plaintext knowledge content at rest, tamper/wrong-key restore fails before application mutation, and both SQLite and Postgres recovery remain proven.
+
+### S20 — Retrieval quality evaluation and regression gates
+- [ ] define a local evaluation dataset format with question, expected source/document constraints, and optional answer rubric
+- [ ] add offline retrieval metrics such as Recall@K, MRR/nDCG where appropriate, citation hit rate, and grounded-answer checks
+- [ ] compare dense-only versus hybrid retrieval under the same tenant-authoritative boundary
+- [ ] add deterministic local benchmark fixtures that require no paid model API
+- [ ] add configurable quality thresholds to CI without introducing flaky LLM-judge dependence
+- [ ] record retrieval latency/quality trade-offs and recommended default tuning
+
+Acceptance: retrieval changes cannot silently regress the committed local evaluation baseline beyond documented thresholds.
+
+### S21 — Ingestion lifecycle and connector expansion
+- [ ] add content-hash based duplicate detection/idempotent ingestion where it does not violate explicit reindex semantics
+- [ ] add safe scheduled/recurrent reindex primitives using the existing durable DB queue rather than an external scheduler/queue dependency
+- [ ] define connector adapter boundary for additional self-hostable sources without embedding third-party credentials in browser clients
+- [ ] preserve SSRF, upload-security, tenant, audit, retry, and cancellation guarantees for every connector
+- [ ] expose ingestion provenance and last-success/last-failure metadata for operators
+- [ ] add connector contract tests and failure/retry coverage
+
+Acceptance: connector additions remain tenant-bound, auditable, resumable, bounded, and local-first.
+
+### S22 — Admin operations and knowledge-quality UX
+- [ ] expose tenant-safe ingestion/job health, failures, retry state, and provenance in Admin UI
+- [ ] add document/chunk inspection with source metadata while respecting viewer/admin authorization
+- [ ] add retrieval-debug view for dense score, lexical contribution, final rank, and active server-authoritative filters without exposing secrets
+- [ ] add safe bulk reindex/delete workflows with explicit confirmation and bounded operations
+- [ ] add accessibility and keyboard-navigation regression coverage for critical Admin flows
+- [ ] preserve server-side service credentials and same-origin mutation enforcement
+
+Acceptance: operators can diagnose ingestion and retrieval quality without shell/database access and without weakening the browser trust boundary.
+
+### S23 — Scale, resilience, and failure-recovery hardening
+- [ ] define supported single-node and Postgres multi-replica deployment envelopes
+- [ ] add multi-worker concurrency/load tests for queue leases, renewal, retries, and cancellation
+- [ ] add controlled Qdrant/Postgres/Ollama outage and recovery tests for documented failure modes
+- [ ] verify bounded retries/backoff and no unbounded memory/disk growth during dependency outages
+- [ ] add graceful shutdown/drain evidence for backend and worker processes
+- [ ] calibrate SLOs using collected benchmark evidence and document capacity assumptions
+
+Acceptance: representative dependency failures recover without cross-tenant leakage, duplicate destructive mutation, stuck leases, or uncontrolled resource growth.
+
+### S24 — Governed zworkforce knowledge capabilities v2
+- [ ] refresh `cvsz/zworkforce` consumer contract before changes
+- [ ] add optional structured retrieval metadata needed for governed agent decisions without exposing internal vector-store access
+- [ ] propagate stable trace/request IDs across zworkforce → zknowbase → provider/vector spans
+- [ ] add explicit policy hooks for allowed knowledge domains/document classes where zworkforce governance requires them
+- [ ] keep authenticated zknowbase service-key tenant authoritative over all consumer metadata
+- [ ] expand cross-repository integration tests for denied policy, tenant mismatch, timeouts, cancellation, and degraded knowledge service behavior
+
+Acceptance: agents gain richer governed knowledge capabilities while remaining least-privilege and unable to reach Qdrant directly.
+
+### S25 — v0.2.0 production release evidence
+- [ ] all S18-S24 release-scoped items implemented or explicitly deferred with documented rationale
+- [ ] exact-head CI and Security workflows green
+- [ ] no open failing/stale release PRs or unresolved high/critical production vulnerabilities
+- [ ] real Postgres/Qdrant integration and bounded performance evidence green
+- [ ] encrypted-backup DR drill completed if S19 is release-scoped
+- [ ] retrieval-quality regression evidence recorded
+- [ ] operational/security/deployment/upgrade/rollback documentation reconciled
+- [ ] zworkforce compatibility evidence recorded for the final consumer SHA
+- [ ] changelog and `v0.2.0` release notes complete
+- [ ] release tag resolves exactly to the approved release commit
+
+Final verdict for this program must be exactly one of:
+
+`V0.2.0 FINAL RELEASE — APPROVED`
+
+or
+
+`V0.2.0 FINAL RELEASE — BLOCKED`
+
+Do not mark S18-S25 complete based on intent, partial implementation, local-only assumptions, or documentation without executable evidence.
+
+## Post-v0.1 execution priority
+1. Fix any regression or failing CI/security gate on `main` first.
+2. S18 repository governance and release safety.
+3. S19 native portable-backup confidentiality.
+4. S20 retrieval quality evaluation/regression gates.
+5. S23 scale/resilience hardening when it blocks correctness or SLO evidence.
+6. S21 ingestion lifecycle/connectors.
+7. S22 Admin operations/quality UX.
+8. S24 governed zworkforce capabilities v2.
+9. S25 final `v0.2.0` release evidence.
+
+One focused PR per vertical slice. Never weaken S1-S17 security, tenant, local-first, CI, DR, or governance guarantees merely to make a new feature pass.
