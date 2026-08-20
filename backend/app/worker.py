@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import signal
 import socket
 from contextlib import suppress
 from uuid import uuid4
@@ -130,37 +131,82 @@ async def _run_job(queue, job, worker_id: str, settings) -> None:
                 await heartbeat
 
 
-async def run_worker() -> None:
+async def _wait_for_work_or_stop(stop_event: asyncio.Event, poll_seconds: float) -> None:
+    if stop_event.is_set():
+        return
+    try:
+        await asyncio.wait_for(stop_event.wait(), timeout=poll_seconds)
+    except TimeoutError:
+        pass
+
+
+async def run_worker(stop_event: asyncio.Event | None = None) -> None:
     settings = get_settings()
     configure_tracing(settings)
     queue = ingestion_queue(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex[:8]}"
+    stop_event = stop_event or asyncio.Event()
     logger.info(
         "worker_started worker_id=%s metadata_backend=%s",
         worker_id,
         settings.metadata_backend,
     )
-    while True:
-        async with async_mutation_lock(settings.maintenance_lock_path, exclusive=False):
-            _reap_and_reconcile(queue, settings)
-            job = queue.claim_next(worker_id, settings.worker_lease_seconds)
-            if job is not None:
-                INGESTION_JOBS.labels(outcome="claimed").inc()
-                logger.info(
-                    "ingestion_claimed job_id=%s document_id=%s tenant_id=%s attempt=%s/%s",
-                    job.id,
-                    job.document_id,
-                    job.tenant_id,
-                    job.attempts,
-                    job.max_attempts,
-                )
-                await _run_job(queue, job, worker_id, settings)
-                continue
-        await asyncio.sleep(settings.worker_poll_seconds)
+    try:
+        while not stop_event.is_set():
+            async with async_mutation_lock(settings.maintenance_lock_path, exclusive=False):
+                _reap_and_reconcile(queue, settings)
+                # A shutdown signal may arrive while acquiring the maintenance lock.
+                # Do not claim new work after the drain boundary has been requested.
+                if stop_event.is_set():
+                    break
+                job = queue.claim_next(worker_id, settings.worker_lease_seconds)
+                if job is not None:
+                    INGESTION_JOBS.labels(outcome="claimed").inc()
+                    logger.info(
+                        "ingestion_claimed job_id=%s document_id=%s tenant_id=%s attempt=%s/%s",
+                        job.id,
+                        job.document_id,
+                        job.tenant_id,
+                        job.attempts,
+                        job.max_attempts,
+                    )
+                    # Deliberately drain the active lease to a terminal/requeued queue
+                    # transition before observing stop_event again. This prevents a
+                    # graceful SIGTERM from abandoning a claimed job mid-mutation.
+                    await _run_job(queue, job, worker_id, settings)
+                    continue
+            await _wait_for_work_or_stop(stop_event, settings.worker_poll_seconds)
+    finally:
+        logger.info("worker_stopped worker_id=%s", worker_id)
+
+
+async def _run_worker_with_signals() -> None:
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    registered: list[signal.Signals] = []
+
+    def request_stop() -> None:
+        if not stop_event.is_set():
+            logger.info("worker_shutdown_requested")
+            stop_event.set()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, request_stop)
+        except (NotImplementedError, RuntimeError):
+            continue
+        registered.append(sig)
+
+    try:
+        await run_worker(stop_event)
+    finally:
+        for sig in registered:
+            with suppress(NotImplementedError, RuntimeError):
+                loop.remove_signal_handler(sig)
 
 
 def main() -> None:
-    asyncio.run(run_worker())
+    asyncio.run(_run_worker_with_signals())
 
 
 if __name__ == "__main__":

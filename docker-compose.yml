@@ -142,6 +142,7 @@ services:
     build: ./backend
     command: ["python", "-m", "app.worker"]
     restart: unless-stopped
+    stop_grace_period: ${ZKB_WORKER_STOP_GRACE_PERIOD:-6m}
     healthcheck:
       disable: true
     depends_on:
