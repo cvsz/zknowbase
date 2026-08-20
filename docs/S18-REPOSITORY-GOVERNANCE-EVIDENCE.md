@@ -65,30 +65,41 @@ gh api repos/cvsz/zknowbase/branches/main/protection \
 - `docs/RELEASE-SAFETY.md` documents required merge, emergency, hotfix, tag, and
   provenance procedures.
 
-## Current Pull Request Evidence
+## Failing Required-Check Denial Probe
 
-At configuration time, open release-cycle documentation PRs targeting `main`
-reported `mergeStateStatus: CLEAN` and successful CI/Security check rollups.
-They still require the configured review and conversation gates before normal
-merge.
+PR #66, `test: prove protected-main rejects failing required checks`, was opened
+solely as a governance probe from protected `main`. Its head was
+`131a45b375da41bc978d826d8da361b415786afe` and included an intentionally failing
+backend pytest while leaving the other repository checks unchanged.
 
-This is partial evidence only. It verifies the configured branch-protection
-shape and shows that open PRs are evaluated by the required checks, but it does
-not yet prove the complete S18 acceptance path. S18 remains incomplete until the
-repository records both:
+GitHub CI run `32427160455` recorded the required `backend` job as `failure` while
+`frontend`, `performance`, `compose`, and `retrieval-quality` completed
+successfully. A normal merge attempt was then sent through GitHub's merge API
+with the exact expected head SHA. GitHub rejected the merge with HTTP 405 and
+reported both enforcement reasons:
 
-- a deliberately failing PR that GitHub blocks from normal merge; and
-- a green PR that successfully merges through the normal protected path.
+- `At least 1 approving review is required by reviewers with write access.`
+- `Required status check "backend" is failing.`
+
+No protection setting was changed or bypassed. PR #66 was closed unmerged after
+the denial was observed. This proves the deliberately failing PR half of S18's
+acceptance criterion through the same normal merge endpoint used for valid PRs.
+
+## Green Normal-Merge Probe
+
+The remaining S18 acceptance step is a green PR successfully merging through the
+same protected path after current required checks and an independent approving
+review. PR #62 itself is the canonical green probe once its exact current head
+passes CI/Security, receives a current non-stale approval, and GitHub accepts its
+normal merge.
 
 ## Acceptance Mapping
 
-- Failing PRs cannot merge through the normal path because every PR targeting
-  `main` must satisfy the listed current required checks, review, code-owner,
-  up-to-date, and conversation-resolution gates. GitHub-observable proof of a
-  deliberately failing PR being blocked is still required.
-- Green PRs can proceed through the normal path after required review and code
-  owner gates are satisfied. GitHub-observable proof of a green PR successfully
-  merging through that path is still required.
+- A deliberately failing PR cannot merge through the normal path: proven by PR
+  #66, failed required `backend` check, exact-head merge rejection, and unmerged
+  closure.
+- A green PR can proceed through the normal path after required review and code
+  owner gates are satisfied: pending successful protected merge of PR #62.
 - Direct `main` pushes, force pushes, and branch deletion are disabled by policy.
 - Emergency changes use the documented hotfix process and must record any
   temporary governance change as explicit release evidence.
