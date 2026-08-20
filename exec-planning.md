@@ -244,16 +244,18 @@ Release evidence: release-candidate commit `e9ea3d69fca21bf21b3323cd289f1b5edab3
 Acceptance: a deliberately failing PR cannot merge through the normal path, a green PR can merge, and the governance configuration is recorded as release evidence.
 
 ### S19 — Native portable-backup confidentiality
-- [ ] add optional native authenticated encryption for portable backup archives using an established reviewed cryptographic library
-- [ ] keep the default runtime self-hosted with no hosted KMS dependency
-- [ ] load backup keys from operator-controlled secret files or equivalent server-side secret boundary; never from browser/public environment variables
-- [ ] use a versioned envelope and fresh nonce/IV per archive
-- [ ] bound encryption/decryption memory usage for large backups
-- [ ] authenticate/decrypt completely before archive parsing or destructive restore mutation
-- [ ] fail closed on wrong key, corruption, truncation, insecure key-file permissions, and plaintext archives when encryption is required
-- [ ] preserve tenant key/job/audit ownership and legacy backup compatibility according to explicit migration policy
-- [ ] add encrypted backup/verify/restore and negative security regression tests
-- [ ] update encryption and DR documentation with rotation/escrow/retention procedures
+- [x] add optional native authenticated encryption for portable backup archives using an established reviewed cryptographic library
+- [x] keep the default runtime self-hosted with no hosted KMS dependency
+- [x] load backup keys from operator-controlled secret files or equivalent server-side secret boundary; never from browser/public environment variables
+- [x] use a versioned envelope and fresh nonce/IV per archive
+- [x] bound encryption/decryption memory usage for large backups
+- [x] authenticate/decrypt completely before archive parsing or destructive restore mutation
+- [x] fail closed on wrong key, corruption, truncation, insecure key-file permissions, and plaintext archives when encryption is required
+- [x] preserve tenant key/job/audit ownership and legacy backup compatibility according to explicit migration policy
+- [x] add encrypted backup/verify/restore and negative security regression tests
+- [x] update encryption and DR documentation with rotation/escrow/retention procedures
+
+Evidence: PR #54 (`security: complete S19 backup confidentiality evidence`) merged as `53ae26c6086525f0e03131a1cbbce62024876bc0` after exact-head CI run `32361797503` (CI #156) and Security run `32361797482` (Security #36) succeeded. PR #58 (`docs: record S19 portable backup confidentiality evidence`) merged as `82b0c1a0f7c4b09b7e1c9edbf9b815ab3737eb8a` after exact-head CI #178 and Security #58 succeeded. `docs/S19-PORTABLE-BACKUP-CONFIDENTIALITY-EVIDENCE.md` records the implementation, negative-security, tenant-compatibility, and key-rotation/escrow/retention evidence.
 
 Acceptance: an encrypted archive exposes no plaintext knowledge content at rest, tamper/wrong-key restore fails before application mutation, and both SQLite and Postgres recovery remain proven.
 
