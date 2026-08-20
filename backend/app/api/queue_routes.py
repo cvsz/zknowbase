@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
+from app.content_identity import file_document_id, sha256_content
 from app.core.config import Settings, get_settings
 from app.core.security import Principal, require_scopes
 from app.models.schemas import (
@@ -14,6 +15,7 @@ from app.models.schemas import (
 from app.observability import INGESTION_JOBS
 from app.rag.loaders import ALLOWED_SUFFIXES
 from app.store_factory import document_store, ingestion_queue
+from app.upload_security import UploadSecurity, UploadSecurityError
 
 router = APIRouter()
 
@@ -37,11 +39,36 @@ async def enqueue_file(
     data = await file.read(max_bytes + 1)
     if len(data) > max_bytes:
         raise HTTPException(413, "File exceeds upload limit")
+    try:
+        await UploadSecurity(settings).inspect(filename, data)
+    except UploadSecurityError as exc:
+        raise HTTPException(422, f"Upload rejected: {exc}") from exc
 
-    doc_id = str(uuid4())
-    saved = settings.upload_dir / f"{doc_id}{suffix}"
+    content_hash = sha256_content(data)
+    doc_id = file_document_id(principal.tenant_id, content_hash)
     docs = document_store(settings)
     queue = ingestion_queue(settings)
+    existing = docs.get(doc_id)
+    if existing is not None and existing.tenant_id != principal.tenant_id:
+        raise HTTPException(409, "Document content identity collides with another tenant")
+    if existing is not None:
+        if existing.status not in {"failed", "cancelled"} or queue.active_for_document(
+            doc_id, principal.tenant_id
+        ):
+            raise HTTPException(
+                409,
+                detail={
+                    "message": "Duplicate file content already exists for this tenant",
+                    "document_id": existing.id,
+                    "status": existing.status,
+                    "content_hash": f"sha256:{content_hash}",
+                },
+            )
+
+    if existing is not None and existing.source_type == "file" and existing.source_uri:
+        saved = Path(existing.source_uri)
+    else:
+        saved = settings.upload_dir / f"{doc_id}{suffix}"
     now = docs.now()
     record = DocumentRecord(
         id=doc_id,
@@ -52,13 +79,28 @@ async def enqueue_file(
         content_type=file.content_type,
         status="queued",
         size_bytes=len(data),
-        created_at=now,
+        created_at=existing.created_at if existing is not None else now,
         updated_at=now,
     )
 
+    if not docs.reserve(record):
+        current = docs.get(doc_id)
+        if current is None:
+            raise HTTPException(409, "Document content reservation changed; retry request")
+        if current.tenant_id != principal.tenant_id:
+            raise HTTPException(409, "Document content identity collides with another tenant")
+        raise HTTPException(
+            409,
+            detail={
+                "message": "Duplicate file content already exists for this tenant",
+                "document_id": current.id,
+                "status": current.status,
+                "content_hash": f"sha256:{content_hash}",
+            },
+        )
+
     try:
         saved.write_bytes(data)
-        docs.upsert(record)
         job = queue.enqueue(
             record.id,
             "file",
@@ -66,11 +108,21 @@ async def enqueue_file(
             settings.ingestion_job_max_attempts,
             tenant_id=principal.tenant_id,
         )
-        INGESTION_JOBS.labels(outcome="enqueued").inc()
     except Exception as exc:
-        saved.unlink(missing_ok=True)
-        docs.delete(record.id)
+        # Some queue backends may fail after durably recording a job. Preserve
+        # the reservation/source if a job is now active so the worker never loses
+        # state owned by a successful enqueue.
+        if not queue.active_for_document(doc_id, principal.tenant_id):
+            saved.unlink(missing_ok=True)
+            current = docs.get(record.id)
+            if (
+                current is not None
+                and current.tenant_id == principal.tenant_id
+                and current.status == "queued"
+            ):
+                docs.delete(record.id)
         raise HTTPException(503, f"Unable to queue ingestion: {exc}") from exc
+    INGESTION_JOBS.labels(outcome="enqueued").inc()
     return AsyncIngestResponse(document=record, job=job)
 
 

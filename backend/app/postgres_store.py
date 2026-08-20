@@ -66,6 +66,43 @@ class PostgresDocumentStore(_PostgresBase):
                 "ON documents(tenant_id, created_at DESC)"
             )
 
+    def reserve(self, record: DocumentRecord) -> bool:
+        """Atomically reserve a deterministic document id for ingestion."""
+        data = record.model_dump()
+        with self.pool.connection() as conn:
+            with conn.transaction():
+                inserted = conn.execute(
+                    """
+                    INSERT INTO documents
+                    (id,tenant_id,name,source_type,source_uri,content_type,status,chunk_count,size_bytes,created_at,updated_at,error)
+                    VALUES (%(id)s,%(tenant_id)s,%(name)s,%(source_type)s,%(source_uri)s,%(content_type)s,%(status)s,
+                            %(chunk_count)s,%(size_bytes)s,%(created_at)s,%(updated_at)s,%(error)s)
+                    ON CONFLICT(id) DO NOTHING
+                    """,
+                    data,
+                )
+                if inserted.rowcount == 1:
+                    return True
+                retried = conn.execute(
+                    """
+                    UPDATE documents SET
+                      name=%(name)s,
+                      source_type=%(source_type)s,
+                      source_uri=%(source_uri)s,
+                      content_type=%(content_type)s,
+                      status=%(status)s,
+                      chunk_count=%(chunk_count)s,
+                      size_bytes=%(size_bytes)s,
+                      updated_at=%(updated_at)s,
+                      error=%(error)s
+                    WHERE id=%(id)s
+                      AND tenant_id=%(tenant_id)s
+                      AND status IN ('failed','cancelled')
+                    """,
+                    data,
+                )
+                return retried.rowcount == 1
+
     def upsert(self, record: DocumentRecord) -> DocumentRecord:
         data = record.model_dump()
         with self.pool.connection() as conn:

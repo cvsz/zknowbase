@@ -53,10 +53,58 @@ class DocumentStore:
             )
             conn.commit()
 
-    def upsert(self, record: DocumentRecord) -> DocumentRecord:
+    @staticmethod
+    def _db_data(record: DocumentRecord) -> dict:
         data = record.model_dump()
         data["created_at"] = record.created_at.isoformat()
         data["updated_at"] = record.updated_at.isoformat()
+        return data
+
+    def reserve(self, record: DocumentRecord) -> bool:
+        """Atomically reserve a deterministic document id for ingestion.
+
+        New identities are inserted exactly once. Existing identities may only be
+        taken over when the same tenant owns a failed/cancelled record. This
+        provides a cross-process reservation boundary without adding a separate
+        lock service or schema.
+        """
+        data = self._db_data(record)
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            inserted = conn.execute(
+                """
+                INSERT OR IGNORE INTO documents
+                (id,tenant_id,name,source_type,source_uri,content_type,status,chunk_count,size_bytes,created_at,updated_at,error)
+                VALUES (:id,:tenant_id,:name,:source_type,:source_uri,:content_type,:status,:chunk_count,:size_bytes,:created_at,:updated_at,:error)
+                """,
+                data,
+            )
+            if inserted.rowcount == 1:
+                conn.commit()
+                return True
+            retried = conn.execute(
+                """
+                UPDATE documents SET
+                  name=:name,
+                  source_type=:source_type,
+                  source_uri=:source_uri,
+                  content_type=:content_type,
+                  status=:status,
+                  chunk_count=:chunk_count,
+                  size_bytes=:size_bytes,
+                  updated_at=:updated_at,
+                  error=:error
+                WHERE id=:id
+                  AND tenant_id=:tenant_id
+                  AND status IN ('failed','cancelled')
+                """,
+                data,
+            )
+            conn.commit()
+            return retried.rowcount == 1
+
+    def upsert(self, record: DocumentRecord) -> DocumentRecord:
+        data = self._db_data(record)
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
