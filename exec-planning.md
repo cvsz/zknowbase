@@ -234,14 +234,20 @@ Release evidence: release-candidate commit `e9ea3d69fca21bf21b3323cd289f1b5edab3
 `v0.1.0` is the completed production baseline. The slices below define the next evidence-driven development program toward `v0.2.0`. They are intentionally unchecked until code, tests, CI, operational evidence, and documentation prove completion. Every slice must preserve S1-S17 guarantees and the local-first / zero recurring API cost default.
 
 ### S18 — Repository governance and release safety
-- [ ] enable repository rules/branch protection for `main` with pull-request-only changes
-- [ ] require current CI and Security workflow checks before merge
-- [ ] prevent force-push and branch deletion for `main`
-- [ ] define emergency/break-glass procedure without silently bypassing evidence requirements
-- [ ] add CODEOWNERS/reviewer ownership for backend security, frontend auth, operations, and release-sensitive paths where appropriate
-- [ ] document release/tag provenance and post-release hotfix procedure
+- [x] enable repository rules/branch protection for `main` with pull-request-only changes
+- [x] require current CI and Security workflow checks before merge
+- [x] prevent force-push and branch deletion for `main`
+- [x] define emergency/break-glass procedure without silently bypassing evidence requirements
+- [x] add CODEOWNERS/reviewer ownership for backend security, frontend auth, operations, and release-sensitive paths where appropriate
+- [x] document release/tag provenance and post-release hotfix procedure
 
 Acceptance: a deliberately failing PR cannot merge through the normal path, a green PR can merge, and the governance configuration is recorded as release evidence.
+
+Evidence: `main` branch protection was configured on 2026-08-20 with required
+current CI/Security checks, strict up-to-date status checks, required review,
+code-owner review, stale-review dismissal, required conversation resolution,
+administrator enforcement, and force-push/deletion disabled. See
+`docs/S18-REPOSITORY-GOVERNANCE-EVIDENCE.md` and `docs/RELEASE-SAFETY.md`.
 
 ### S19 — Native portable-backup confidentiality
 - [x] add optional native authenticated encryption for portable backup archives using an established reviewed cryptographic library
