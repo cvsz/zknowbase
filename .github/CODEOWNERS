@@ -1,38 +1,38 @@
 # Default ownership
-* @cvsz @policedbc
+* @cvsz
 
 # Backend security/auth/tenant boundaries
-/backend/app/auth* @cvsz @policedbc
-/backend/app/security* @cvsz @policedbc
-/backend/app/**/auth* @cvsz @policedbc
-/backend/app/**/security* @cvsz @policedbc
-/backend/app/**/tenant* @cvsz @policedbc
-/backend/tests/**/test_auth* @cvsz @policedbc
-/backend/tests/**/test_security* @cvsz @policedbc
-/backend/tests/**/test_tenant* @cvsz @policedbc
+/backend/app/auth* @cvsz
+/backend/app/security* @cvsz
+/backend/app/**/auth* @cvsz
+/backend/app/**/security* @cvsz
+/backend/app/**/tenant* @cvsz
+/backend/tests/**/test_auth* @cvsz
+/backend/tests/**/test_security* @cvsz
+/backend/tests/**/test_tenant* @cvsz
 
 # Frontend authentication and server-side proxy boundary
-/frontend/src/app/api/** @cvsz @policedbc
-/frontend/src/**/auth* @cvsz @policedbc
-/frontend/src/**/middleware* @cvsz @policedbc
+/frontend/src/app/api/** @cvsz
+/frontend/src/**/auth* @cvsz
+/frontend/src/**/middleware* @cvsz
 
 # Operations, deployment, recovery, and observability
-/docker-compose.yml @cvsz @policedbc
-/Dockerfile* @cvsz @policedbc
-/backend/Dockerfile* @cvsz @policedbc
-/frontend/Dockerfile* @cvsz @policedbc
-/ops/** @cvsz @policedbc
-/observability/** @cvsz @policedbc
-/docs/*BACKUP* @cvsz @policedbc
-/docs/*RESTORE* @cvsz @policedbc
-/docs/*DEPLOYMENT* @cvsz @policedbc
-/docs/*SECURITY* @cvsz @policedbc
-/docs/*OBSERVABILITY* @cvsz @policedbc
+/docker-compose.yml @cvsz
+/Dockerfile* @cvsz
+/backend/Dockerfile* @cvsz
+/frontend/Dockerfile* @cvsz
+/ops/** @cvsz
+/observability/** @cvsz
+/docs/*BACKUP* @cvsz
+/docs/*RESTORE* @cvsz
+/docs/*DEPLOYMENT* @cvsz
+/docs/*SECURITY* @cvsz
+/docs/*OBSERVABILITY* @cvsz
 
 # Release policy and evidence
-/.github/workflows/** @cvsz @policedbc
-/.github/CODEOWNERS @cvsz @policedbc
-/exec-planning.md @cvsz @policedbc
-/CHANGELOG.md @cvsz @policedbc
-/docs/RELEASE* @cvsz @policedbc
-/docs/PRODUCTION-EVIDENCE.md @cvsz @policedbc
+/.github/workflows/** @cvsz
+/.github/CODEOWNERS @cvsz
+/exec-planning.md @cvsz
+/CHANGELOG.md @cvsz
+/docs/RELEASE* @cvsz
+/docs/PRODUCTION-EVIDENCE.md @cvsz
