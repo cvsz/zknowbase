@@ -57,6 +57,64 @@ def test_async_file_enqueue_list_and_cancel(monkeypatch, tmp_path):
     get_settings.cache_clear()
 
 
+def test_async_duplicate_file_is_rejected_before_second_queue_job(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"X-API-Key": "this-is-a-test-secret-key"}
+    content = b"# Stable content\nSame tenant upload should be idempotent."
+
+    first = client.post(
+        "/api/v1/ingest/async",
+        headers=headers,
+        files={"file": ("first.md", content, "text/markdown")},
+    )
+    assert first.status_code == 202
+    first_payload = first.json()
+
+    duplicate = client.post(
+        "/api/v1/ingest/async",
+        headers=headers,
+        files={"file": ("renamed.md", content, "text/markdown")},
+    )
+    assert duplicate.status_code == 409
+    detail = duplicate.json()["detail"]
+    assert detail["document_id"] == first_payload["document"]["id"]
+    assert detail["content_hash"].startswith("sha256:")
+
+    jobs = client.get("/api/v1/ingest/jobs", headers=headers).json()
+    assert len(jobs) == 1
+    assert jobs[0]["document_id"] == first_payload["document"]["id"]
+    get_settings.cache_clear()
+
+
+def test_same_file_bytes_have_different_identity_across_tenants(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    settings = get_settings()
+    _record, beta_secret = security_store(settings).create_key(
+        "beta-writer",
+        ["knowledge:read", "knowledge:write"],
+        tenant_id="beta",
+    )
+    content = b"# Shared public template\nTenant identity must still remain distinct."
+
+    default_response = client.post(
+        "/api/v1/ingest/async",
+        headers={"X-API-Key": "this-is-a-test-secret-key"},
+        files={"file": ("shared.md", content, "text/markdown")},
+    )
+    beta_response = client.post(
+        "/api/v1/ingest/async",
+        headers={"X-API-Key": beta_secret},
+        files={"file": ("shared.md", content, "text/markdown")},
+    )
+
+    assert default_response.status_code == 202
+    assert beta_response.status_code == 202
+    assert default_response.json()["document"]["id"] != beta_response.json()["document"]["id"]
+    assert default_response.json()["document"]["tenant_id"] == "default"
+    assert beta_response.json()["document"]["tenant_id"] == "beta"
+    get_settings.cache_clear()
+
+
 def test_async_url_is_queued_without_network_fetch(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     headers = {"X-API-Key": "this-is-a-test-secret-key"}
