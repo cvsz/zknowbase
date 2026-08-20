@@ -1,0 +1,38 @@
+# Default ownership
+* @cvsz
+
+# Backend security/auth/tenant boundaries
+/backend/app/auth* @cvsz
+/backend/app/security* @cvsz
+/backend/app/**/auth* @cvsz
+/backend/app/**/security* @cvsz
+/backend/app/**/tenant* @cvsz
+/backend/tests/**/test_auth* @cvsz
+/backend/tests/**/test_security* @cvsz
+/backend/tests/**/test_tenant* @cvsz
+
+# Frontend authentication and server-side proxy boundary
+/frontend/src/app/api/** @cvsz
+/frontend/src/**/auth* @cvsz
+/frontend/src/**/middleware* @cvsz
+
+# Operations, deployment, recovery, and observability
+/docker-compose.yml @cvsz
+/Dockerfile* @cvsz
+/backend/Dockerfile* @cvsz
+/frontend/Dockerfile* @cvsz
+/ops/** @cvsz
+/observability/** @cvsz
+/docs/*BACKUP* @cvsz
+/docs/*RESTORE* @cvsz
+/docs/*DEPLOYMENT* @cvsz
+/docs/*SECURITY* @cvsz
+/docs/*OBSERVABILITY* @cvsz
+
+# Release policy and evidence
+/.github/workflows/** @cvsz
+/.github/CODEOWNERS @cvsz
+/exec-planning.md @cvsz
+/CHANGELOG.md @cvsz
+/docs/RELEASE* @cvsz
+/docs/PRODUCTION-EVIDENCE.md @cvsz
