@@ -48,6 +48,12 @@ The deployment operator owns all encryption and authentication key material. Bac
 
 For backup-key rotation: generate a replacement 256-bit key, switch future backups to it, retain prior decryption material until all matching archives expire or are recreated, verify the new backup, complete an isolated restore drill, and only then retire the old key. Loss of required decryption material is an availability failure; disclosure requires rotation and incident handling for the affected archive scope.
 
+### Escrow and retention
+
+Production operators should maintain at least one independently protected recovery copy of every backup key that is still required by retained archives. The escrow copy must stay outside the zknowbase repository, browser/client configuration, backup archive, and ordinary application data volume. Acceptable self-hosted boundaries include an offline encrypted removable medium, a separately administered encrypted host/volume, or an operator-controlled secret manager that does not introduce a mandatory hosted dependency.
+
+Each retained archive must have an operator record mapping it to the key generation that can decrypt it. Retention policy must keep that key generation available for at least as long as any corresponding archive, legal hold, or recovery objective requires. Before destroying an old key, operators must either expire all dependent archives or re-create and verify replacements under the new key, then perform an isolated restore drill. Key escrow copies should be access-controlled, periodically inventoried, and recovery-tested without exposing key material in logs, tickets, CI artifacts, or telemetry.
+
 Service-key, bootstrap-key, Admin-session, OIDC/provider, and storage-volume key rotation remain governed by their respective deployment boundaries.
 
 ## Backup and disaster recovery
