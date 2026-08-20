@@ -102,7 +102,10 @@ async def ingest_file(
         return IngestResponse(document=existing)
 
     now = utcnow()
-    saved = settings.upload_dir / f"{doc_id}{Path(filename).suffix.lower()}"
+    if existing is not None and existing.source_type == "file" and existing.source_uri:
+        saved = Path(existing.source_uri)
+    else:
+        saved = settings.upload_dir / f"{doc_id}{Path(filename).suffix.lower()}"
     record = DocumentRecord(
         id=doc_id,
         name=filename,
@@ -115,7 +118,14 @@ async def ingest_file(
         created_at=existing.created_at if existing is not None else now,
         updated_at=now,
     )
-    docs.upsert(record)
+    if not docs.reserve(record):
+        current = docs.get(doc_id)
+        if current is None:
+            raise HTTPException(409, "Document content reservation changed; retry request")
+        if current.tenant_id != principal.tenant_id:
+            raise HTTPException(409, "Document content identity collides with another tenant")
+        return IngestResponse(document=current)
+
     try:
         text = parse_bytes(filename, data)
         saved.write_bytes(data)
