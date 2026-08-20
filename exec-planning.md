@@ -240,18 +240,12 @@ Release evidence: release-candidate commit `e9ea3d69fca21bf21b3323cd289f1b5edab3
 - [x] define emergency/break-glass procedure without silently bypassing evidence requirements
 - [x] add CODEOWNERS/reviewer ownership for backend security, frontend auth, operations, and release-sensitive paths where appropriate
 - [x] document release/tag provenance and post-release hotfix procedure
-- [ ] record GitHub-observable evidence that a deliberately failing PR cannot merge through the normal path
+- [x] record GitHub-observable evidence that a deliberately failing PR cannot merge through the normal path
 - [ ] record GitHub-observable evidence that a green PR can merge through the normal path
 
 Acceptance: a deliberately failing PR cannot merge through the normal path, a green PR can merge, and the governance configuration is recorded as release evidence.
 
-Evidence status: partial. `main` branch protection was configured on 2026-08-20
-with required current CI/Security checks, strict up-to-date status checks,
-required review, code-owner review, stale-review dismissal, required
-conversation resolution, administrator enforcement, and force-push/deletion
-disabled. S18 remains incomplete until the failing-PR denial path and green-PR
-merge path are recorded as GitHub-observable evidence. See
-`docs/S18-REPOSITORY-GOVERNANCE-EVIDENCE.md` and `docs/RELEASE-SAFETY.md`.
+Evidence status: failing-path proven by PR #66 at head `131a45b375da41bc978d826d8da361b415786afe`: required `backend` failed in CI run `32427160455`, GitHub rejected an exact-head normal merge attempt with HTTP 405 citing both the failing required check and missing approving review, and PR #66 was closed unmerged. Green-path evidence remains pending successful protected merge of PR #62 with current exact-head checks and non-stale approval. See `docs/S18-REPOSITORY-GOVERNANCE-EVIDENCE.md` and `docs/RELEASE-SAFETY.md`.
 
 ### S19 — Native portable-backup confidentiality
 - [x] add optional native authenticated encryption for portable backup archives using an established reviewed cryptographic library
