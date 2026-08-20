@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
+from app.content_identity import file_document_id, sha256_content
 from app.core.config import Settings, get_settings
 from app.core.security import Principal, require_scopes
 from app.models.schemas import (
@@ -38,10 +39,26 @@ async def enqueue_file(
     if len(data) > max_bytes:
         raise HTTPException(413, "File exceeds upload limit")
 
-    doc_id = str(uuid4())
+    content_hash = sha256_content(data)
+    doc_id = file_document_id(principal.tenant_id, content_hash)
     saved = settings.upload_dir / f"{doc_id}{suffix}"
     docs = document_store(settings)
     queue = ingestion_queue(settings)
+    existing = docs.get(doc_id)
+    if existing is not None and existing.tenant_id == principal.tenant_id:
+        if existing.status not in {"failed", "cancelled"} or queue.active_for_document(
+            doc_id, principal.tenant_id
+        ):
+            raise HTTPException(
+                409,
+                detail={
+                    "message": "Duplicate file content already exists for this tenant",
+                    "document_id": existing.id,
+                    "status": existing.status,
+                    "content_hash": f"sha256:{content_hash}",
+                },
+            )
+
     now = docs.now()
     record = DocumentRecord(
         id=doc_id,
@@ -52,13 +69,13 @@ async def enqueue_file(
         content_type=file.content_type,
         status="queued",
         size_bytes=len(data),
-        created_at=now,
+        created_at=existing.created_at if existing is not None else now,
         updated_at=now,
     )
 
     try:
-        saved.write_bytes(data)
         docs.upsert(record)
+        saved.write_bytes(data)
         job = queue.enqueue(
             record.id,
             "file",
