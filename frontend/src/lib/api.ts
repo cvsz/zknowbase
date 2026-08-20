@@ -1,4 +1,4 @@
-import type { DocumentRecord, PreviewResponse, QueryResponse, SourceCitation } from "./types";
+import type { DocumentRecord, IngestionJobRecord, PreviewResponse, QueryResponse, SourceCitation } from "./types";
 
 const baseUrl = "/api/zkb";
 
@@ -13,6 +13,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   documents: () => request<DocumentRecord[]>("/documents"),
+  ingestionJobs: (limit = 100) => request<IngestionJobRecord[]>(`/ingest/jobs?limit=${limit}`),
   ingest: (file: File) => { const body = new FormData(); body.append("file", file); return request<{document:DocumentRecord}>("/ingest", {method:"POST", body}); },
   ingestUrl: (url: string) => request<{document:DocumentRecord}>("/ingest/url", {method:"POST", body:JSON.stringify({url})}),
   preview: (file: File) => { const body = new FormData(); body.append("file", file); return request<PreviewResponse>("/ingest/preview", {method:"POST", body}); },

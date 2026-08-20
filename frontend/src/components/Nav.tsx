@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { BrainCircuit, Database, MessageSquareText, Upload } from "lucide-react";
+import { BrainCircuit, Database, ListChecks, MessageSquareText, Upload } from "lucide-react";
 import type { AdminRole } from "@/lib/admin-auth";
 import { LogoutButton } from "@/components/LogoutButton";
 
 const items = [
   ["Dashboard", "/", BrainCircuit, "viewer"],
   ["Ingestion", "/ingest", Upload, "admin"],
+  ["Jobs", "/jobs", ListChecks, "viewer"],
   ["Vectors", "/vectors", Database, "viewer"],
   ["Playground", "/playground", MessageSquareText, "viewer"],
 ] as const;
