@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import app.backup as backup
-from app.backup_crypto import MAGIC, is_encrypted_archive
+from app.backup_crypto import MAGIC, decrypt_archive, encrypt_archive, is_encrypted_archive
 from app.core.config import Settings
 from app.models.schemas import DocumentRecord
 from app.store import DocumentStore
@@ -156,6 +156,27 @@ def test_backup_key_file_permissions_fail_closed(tmp_path):
     settings = _settings(tmp_path, key_file)
     with pytest.raises(backup.BackupError, match="group/world accessible"):
         backup._backup_key(settings)
+
+
+def test_crypto_outputs_are_owner_only_even_with_permissive_umask(tmp_path):
+    if os.name == "nt":
+        pytest.skip("POSIX file permissions are not available on Windows")
+    source = tmp_path / "plain.tar.gz"
+    encrypted = tmp_path / "backup.zkb"
+    decrypted = tmp_path / "decrypted.tar.gz"
+    source.write_bytes(b"sensitive backup payload")
+    key = b"k" * 32
+
+    previous_umask = os.umask(0)
+    try:
+        encrypt_archive(source, encrypted, key)
+        decrypt_archive(encrypted, decrypted, key)
+    finally:
+        os.umask(previous_umask)
+
+    assert encrypted.stat().st_mode & 0o077 == 0
+    assert decrypted.stat().st_mode & 0o077 == 0
+    assert decrypted.read_bytes() == source.read_bytes()
 
 
 def test_required_encryption_configuration_needs_key_file(tmp_path):
