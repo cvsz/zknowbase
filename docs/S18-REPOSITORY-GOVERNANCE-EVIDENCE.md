@@ -61,7 +61,9 @@ gh api repos/cvsz/zknowbase/branches/main/protection \
 - `.github/CODEOWNERS` defines default ownership and release-sensitive path
   ownership for backend security/auth/tenant code, frontend auth/proxy code,
   operations/deployment/recovery/observability files, workflows, release
-  planning, changelog, and release evidence.
+  planning, changelog, and release evidence. Each ownership rule names `@cvsz`
+  and independent reviewer `@policedbc`, so owner-authored PRs have an eligible
+  non-author code owner for the required review gate.
 - `docs/RELEASE-SAFETY.md` documents required merge, emergency, hotfix, tag, and
   provenance procedures.
 
@@ -88,10 +90,10 @@ acceptance criterion through the same normal merge endpoint used for valid PRs.
 ## Green Normal-Merge Probe
 
 The remaining S18 acceptance step is a green PR successfully merging through the
-same protected path after current required checks and an independent approving
-review. PR #62 itself is the canonical green probe once its exact current head
-passes CI/Security, receives a current non-stale approval, and GitHub accepts its
-normal merge.
+same protected path after current required checks and an independent code-owner
+approval. PR #62 itself is the canonical green probe once its exact current head
+passes CI/Security, receives a current non-stale `@policedbc` approval, and
+GitHub accepts its normal merge.
 
 ## Acceptance Mapping
 
