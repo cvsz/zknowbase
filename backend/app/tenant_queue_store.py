@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 from typing import Protocol
 
 from psycopg_pool import ConnectionPool
@@ -15,6 +16,7 @@ class BaseIngestionQueue(Protocol):
         source_type: str,
         source_uri: str,
         max_attempts: int = 3,
+        available_at: datetime | None = None,
     ) -> IngestionJobRecord: ...
 
     def get(self, job_id: str) -> IngestionJobRecord | None: ...
@@ -145,6 +147,7 @@ class TenantIngestionQueue:
         source_type: str,
         source_uri: str,
         max_attempts: int = 3,
+        available_at: datetime | None = None,
         *,
         tenant_id: str | None = None,
     ) -> IngestionJobRecord:
@@ -155,7 +158,7 @@ class TenantIngestionQueue:
         documented single-tenant compatibility policy.
         """
         effective_tenant = tenant_id or self.default_tenant_id
-        job = self.base.enqueue(document_id, source_type, source_uri, max_attempts)
+        job = self.base.enqueue(document_id, source_type, source_uri, max_attempts, available_at)
         self._bind(job.id, effective_tenant)
         job.tenant_id = effective_tenant
         return job

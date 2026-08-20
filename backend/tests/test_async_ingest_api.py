@@ -1,4 +1,5 @@
 import threading
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -6,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.api.queue_routes import router as queue_router
 from app.api.routes import router as core_router
 from app.core.config import get_settings
+from app.models.schemas import DocumentRecord
 from app.store import DocumentStore
 from app.store_factory import document_store, security_store
 
@@ -174,6 +176,83 @@ def test_async_url_is_queued_without_network_fetch(monkeypatch, tmp_path):
     assert payload["document"]["source_type"] == "url"
     assert payload["document"]["status"] == "queued"
     assert payload["job"]["source_uri"] == "https://example.com/manual"
+    get_settings.cache_clear()
+
+
+def test_async_reindex_schedules_existing_document(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"X-API-Key": "this-is-a-test-secret-key"}
+    settings = get_settings()
+    docs = document_store(settings)
+    now = datetime.now(timezone.utc)
+    record = DocumentRecord(
+        id="doc-ready",
+        name="manual.md",
+        tenant_id="default",
+        source_type="file",
+        source_uri=str(tmp_path / "uploads" / "manual.md"),
+        content_type="text/markdown",
+        status="ready",
+        chunk_count=3,
+        size_bytes=42,
+        created_at=now,
+        updated_at=now,
+    )
+    docs.upsert(record)
+
+    response = client.post(
+        "/api/v1/documents/doc-ready/reindex/async",
+        headers=headers,
+        json={"run_after_seconds": 3600},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["document"]["id"] == "doc-ready"
+    assert payload["document"]["status"] == "queued"
+    assert payload["job"]["document_id"] == "doc-ready"
+    assert payload["job"]["tenant_id"] == "default"
+    assert payload["job"]["available_at"] is not None
+    assert client.post("/api/v1/documents/doc-ready/reindex/async", headers=headers).status_code == 409
+    get_settings.cache_clear()
+
+
+def test_async_reindex_is_tenant_scoped(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    settings = get_settings()
+    _record, beta_secret = security_store(settings).create_key(
+        "beta-writer",
+        ["knowledge:read", "knowledge:write"],
+        tenant_id="beta",
+    )
+    now = datetime.now(timezone.utc)
+    document_store(settings).upsert(
+        DocumentRecord(
+            id="beta-doc",
+            name="beta.md",
+            tenant_id="beta",
+            source_type="url",
+            source_uri="https://example.com/beta",
+            status="ready",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    assert (
+        client.post(
+            "/api/v1/documents/beta-doc/reindex/async",
+            headers={"X-API-Key": "this-is-a-test-secret-key"},
+        ).status_code
+        == 404
+    )
+    beta_response = client.post(
+        "/api/v1/documents/beta-doc/reindex/async",
+        headers={"X-API-Key": beta_secret},
+        json={"run_after_seconds": 0},
+    )
+    assert beta_response.status_code == 202
+    assert beta_response.json()["job"]["tenant_id"] == "beta"
     get_settings.cache_clear()
 
 

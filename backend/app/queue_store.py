@@ -38,15 +38,26 @@ class SQLiteIngestionQueue:
                   max_attempts INTEGER NOT NULL DEFAULT 3,
                   worker_id TEXT,
                   lease_expires_at TEXT,
+                  available_at TEXT,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
                   error TEXT
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(ingestion_jobs)").fetchall()
+            }
+            if "available_at" not in columns:
+                conn.execute("ALTER TABLE ingestion_jobs ADD COLUMN available_at TEXT")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_status_created "
                 "ON ingestion_jobs(status, created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_status_available "
+                "ON ingestion_jobs(status, available_at, created_at)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_document_status "
@@ -64,6 +75,7 @@ class SQLiteIngestionQueue:
         source_type: str,
         source_uri: str,
         max_attempts: int = 3,
+        available_at: datetime | None = None,
     ) -> IngestionJobRecord:
         now = self.now()
         record = IngestionJobRecord(
@@ -74,6 +86,7 @@ class SQLiteIngestionQueue:
             status="queued",
             attempts=0,
             max_attempts=max_attempts,
+            available_at=available_at,
             created_at=now,
             updated_at=now,
         )
@@ -82,8 +95,8 @@ class SQLiteIngestionQueue:
                 """
                 INSERT INTO ingestion_jobs
                 (id,document_id,source_type,source_uri,status,attempts,max_attempts,
-                 worker_id,lease_expires_at,created_at,updated_at,error)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                 worker_id,lease_expires_at,available_at,created_at,updated_at,error)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     record.id,
@@ -95,6 +108,7 @@ class SQLiteIngestionQueue:
                     max_attempts,
                     None,
                     None,
+                    available_at.isoformat() if available_at is not None else None,
                     now.isoformat(),
                     now.isoformat(),
                     None,
@@ -172,8 +186,10 @@ class SQLiteIngestionQueue:
                 """
                 SELECT * FROM ingestion_jobs
                 WHERE status='queued' AND attempts < max_attempts
+                  AND (available_at IS NULL OR available_at <= ?)
                 ORDER BY created_at ASC LIMIT 1
-                """
+                """,
+                (now.isoformat(),),
             ).fetchone()
             if not row:
                 conn.commit()
@@ -293,15 +309,21 @@ class PostgresIngestionQueue:
                   max_attempts INTEGER NOT NULL DEFAULT 3,
                   worker_id TEXT,
                   lease_expires_at TIMESTAMPTZ,
+                  available_at TIMESTAMPTZ,
                   created_at TIMESTAMPTZ NOT NULL,
                   updated_at TIMESTAMPTZ NOT NULL,
                   error TEXT
                 )
                 """
             )
+            conn.execute("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS available_at TIMESTAMPTZ")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_status_created "
                 "ON ingestion_jobs(status, created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_status_available "
+                "ON ingestion_jobs(status, available_at, created_at)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_document_status "
@@ -314,6 +336,7 @@ class PostgresIngestionQueue:
         source_type: str,
         source_uri: str,
         max_attempts: int = 3,
+        available_at: datetime | None = None,
     ) -> IngestionJobRecord:
         now = self.now()
         record = IngestionJobRecord(
@@ -324,6 +347,7 @@ class PostgresIngestionQueue:
             status="queued",
             attempts=0,
             max_attempts=max_attempts,
+            available_at=available_at,
             created_at=now,
             updated_at=now,
         )
@@ -332,8 +356,8 @@ class PostgresIngestionQueue:
                 """
                 INSERT INTO ingestion_jobs
                 (id,document_id,source_type,source_uri,status,attempts,max_attempts,
-                 worker_id,lease_expires_at,created_at,updated_at,error)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 worker_id,lease_expires_at,available_at,created_at,updated_at,error)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     record.id,
@@ -345,6 +369,7 @@ class PostgresIngestionQueue:
                     max_attempts,
                     None,
                     None,
+                    available_at,
                     now,
                     now,
                     None,
@@ -421,9 +446,11 @@ class PostgresIngestionQueue:
                     """
                     SELECT * FROM ingestion_jobs
                     WHERE status='queued' AND attempts < max_attempts
+                      AND (available_at IS NULL OR available_at <= %s)
                     ORDER BY created_at ASC
                     FOR UPDATE SKIP LOCKED LIMIT 1
-                    """
+                    """,
+                    (now,),
                 ).fetchone()
                 if not row:
                     return None

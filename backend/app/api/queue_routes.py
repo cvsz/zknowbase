@@ -1,13 +1,15 @@
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 
 from app.content_identity import file_document_id, sha256_content
 from app.core.config import Settings, get_settings
 from app.core.security import Principal, require_scopes
 from app.models.schemas import (
     AsyncIngestResponse,
+    AsyncReindexRequest,
     DocumentRecord,
     IngestionJobRecord,
     UrlIngestRequest,
@@ -164,6 +166,48 @@ def enqueue_url(
     except Exception as exc:
         docs.delete(record.id)
         raise HTTPException(503, f"Unable to queue ingestion: {exc}") from exc
+    return AsyncIngestResponse(document=record, job=job)
+
+
+@router.post(
+    "/documents/{doc_id}/reindex/async",
+    response_model=AsyncIngestResponse,
+    status_code=202,
+)
+def enqueue_reindex(
+    doc_id: str,
+    body: AsyncReindexRequest = Body(default_factory=AsyncReindexRequest),
+    principal: Principal = Depends(require_scopes("knowledge:write")),
+    settings: Settings = Depends(get_settings),
+) -> AsyncIngestResponse:
+    docs = document_store(settings)
+    record = docs.get(doc_id)
+    if record is None or record.tenant_id != principal.tenant_id:
+        raise HTTPException(404, "Document not found")
+    if not record.source_uri:
+        raise HTTPException(409, "Document source is unavailable")
+    if record.source_type not in {"file", "url"}:
+        raise HTTPException(422, f"Unsupported reindex source type: {record.source_type}")
+
+    queue = ingestion_queue(settings)
+    if queue.active_for_document(doc_id, principal.tenant_id):
+        raise HTTPException(409, "Document has an active ingestion job")
+
+    now = docs.now()
+    available_at = now + timedelta(seconds=body.run_after_seconds)
+    record.status = "queued"
+    record.error = None
+    record.updated_at = now
+    docs.upsert(record)
+    job = queue.enqueue(
+        record.id,
+        record.source_type,
+        record.source_uri,
+        settings.ingestion_job_max_attempts,
+        available_at=available_at,
+        tenant_id=principal.tenant_id,
+    )
+    INGESTION_JOBS.labels(outcome="enqueued").inc()
     return AsyncIngestResponse(document=record, job=job)
 
 
