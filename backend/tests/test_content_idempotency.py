@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -5,6 +7,8 @@ import app.api.routes as routes
 from app.api.routes import router as core_router
 from app.content_identity import file_document_id, sha256_content
 from app.core.config import get_settings
+from app.models.schemas import DocumentRecord
+from app.store_factory import document_store
 
 
 def _client(monkeypatch, tmp_path) -> TestClient:
@@ -64,4 +68,39 @@ def test_sync_file_ingestion_returns_existing_document_for_duplicate_bytes(monke
     assert second.json()["document"]["id"] == first.json()["document"]["id"]
     assert second.json()["document"]["name"] == "first.md"
     assert len(list((tmp_path / "uploads").iterdir())) == 1
+    get_settings.cache_clear()
+
+
+def test_sync_file_ingestion_fails_closed_on_cross_tenant_identity_collision(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    settings = get_settings()
+    content = b"# Collision sentinel\nThis row belongs to another tenant."
+    doc_id = file_document_id("default", sha256_content(content))
+    now = datetime.now(timezone.utc)
+    document_store(settings).upsert(
+        DocumentRecord(
+            id=doc_id,
+            name="foreign.md",
+            tenant_id="beta",
+            source_type="file",
+            source_uri=str(tmp_path / "uploads" / f"{doc_id}.md"),
+            content_type="text/markdown",
+            status="ready",
+            chunk_count=1,
+            size_bytes=len(content),
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    response = client.post(
+        "/api/v1/ingest",
+        headers={"X-API-Key": "this-is-a-test-secret-key"},
+        files={"file": ("collision.md", content, "text/markdown")},
+    )
+
+    assert response.status_code == 409
+    restored = document_store(settings).get(doc_id)
+    assert restored is not None
+    assert restored.tenant_id == "beta"
     get_settings.cache_clear()
