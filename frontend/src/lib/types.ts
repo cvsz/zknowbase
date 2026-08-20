@@ -4,6 +4,13 @@ export type DocumentRecord = {
   size_bytes: number; created_at: string; updated_at: string; error?: string | null;
 };
 
+export type IngestionJobRecord = {
+  id: string; document_id: string; tenant_id: string; source_type: "file" | "url";
+  source_uri: string; status: "queued" | "processing" | "completed" | "failed" | "cancelled";
+  attempts: number; max_attempts: number; worker_id?: string | null;
+  lease_expires_at?: string | null; created_at: string; updated_at: string; error?: string | null;
+};
+
 export type SourceCitation = {
   document_id: string; document_name: string; chunk_id: string; chunk_index: number;
   score: number; text: string; source_uri?: string | null;

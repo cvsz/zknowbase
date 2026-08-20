@@ -289,6 +289,8 @@ Acceptance: connector additions remain tenant-bound, auditable, resumable, bound
 
 Acceptance: operators can diagnose ingestion and retrieval quality without shell/database access and without weakening the browser trust boundary.
 
+Evidence status: partial Admin job-health evidence is recorded in `docs/S22-ADMIN-JOB-HEALTH-EVIDENCE.md`; it covers tenant-scoped ingestion job health, retry, lease, source, and failure visibility through the existing server-side Admin proxy. S22 remains incomplete until document/chunk inspection, retrieval-debug, safe bulk workflows, accessibility/keyboard coverage, and broader Admin UX evidence are recorded.
+
 ### S23 — Scale, resilience, and failure-recovery hardening
 - [ ] define supported single-node and Postgres multi-replica deployment envelopes
 - [ ] add multi-worker concurrency/load tests for queue leases, renewal, retries, and cancellation
