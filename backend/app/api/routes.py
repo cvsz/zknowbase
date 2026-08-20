@@ -96,9 +96,10 @@ async def ingest_file(
     doc_id = file_document_id(principal.tenant_id, content_hash)
     docs = document_store(settings)
     existing = docs.get(doc_id)
-    if existing is not None and existing.tenant_id == principal.tenant_id:
-        if existing.status not in {"failed", "cancelled"}:
-            return IngestResponse(document=existing)
+    if existing is not None and existing.tenant_id != principal.tenant_id:
+        raise HTTPException(409, "Document content identity collides with another tenant")
+    if existing is not None and existing.status not in {"failed", "cancelled"}:
+        return IngestResponse(document=existing)
 
     now = utcnow()
     saved = settings.upload_dir / f"{doc_id}{Path(filename).suffix.lower()}"
