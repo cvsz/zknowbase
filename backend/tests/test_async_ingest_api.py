@@ -1,9 +1,12 @@
+import threading
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.queue_routes import router as queue_router
 from app.api.routes import router as core_router
 from app.core.config import get_settings
+from app.store import DocumentStore
 from app.store_factory import document_store, security_store
 
 
@@ -83,6 +86,49 @@ def test_async_duplicate_file_is_rejected_before_second_queue_job(monkeypatch, t
     jobs = client.get("/api/v1/ingest/jobs", headers=headers).json()
     assert len(jobs) == 1
     assert jobs[0]["document_id"] == first_payload["document"]["id"]
+    get_settings.cache_clear()
+
+
+def test_async_concurrent_duplicate_has_single_reservation_and_job(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"X-API-Key": "this-is-a-test-secret-key"}
+    content = b"# Concurrent async\nOnly one request may reserve and enqueue."
+    barrier = threading.Barrier(2)
+    original_reserve = DocumentStore.reserve
+
+    def racing_reserve(self, record):
+        barrier.wait(timeout=5)
+        return original_reserve(self, record)
+
+    monkeypatch.setattr(DocumentStore, "reserve", racing_reserve)
+    responses = []
+    response_lock = threading.Lock()
+
+    def submit(name):
+        response = client.post(
+            "/api/v1/ingest/async",
+            headers=headers,
+            files={"file": (name, content, "text/markdown")},
+        )
+        with response_lock:
+            responses.append(response)
+
+    first = threading.Thread(target=submit, args=("first.md",))
+    second = threading.Thread(target=submit, args=("second.md",))
+    first.start()
+    second.start()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert sorted(response.status_code for response in responses) == [202, 409]
+    jobs = client.get("/api/v1/ingest/jobs", headers=headers).json()
+    assert len(jobs) == 1
+    assert len(list((tmp_path / "uploads").iterdir())) == 1
+    record = document_store(get_settings()).get(jobs[0]["document_id"])
+    assert record is not None
+    assert record.status == "queued"
+    assert record.source_uri is not None
+    assert (tmp_path / "uploads" / record.source_uri.split("/")[-1]).exists()
     get_settings.cache_clear()
 
 
