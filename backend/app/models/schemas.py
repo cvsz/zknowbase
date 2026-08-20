@@ -12,7 +12,6 @@ ServiceKeyScope = Literal[
 
 IngestionJobStatus = Literal["queued", "processing", "completed", "failed", "cancelled"]
 TENANT_ID_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
-CONTENT_HASH_PATTERN = r"^[a-f0-9]{64}$"
 
 
 class DocumentRecord(BaseModel):
@@ -22,7 +21,6 @@ class DocumentRecord(BaseModel):
     source_type: str
     source_uri: str | None = None
     content_type: str | None = None
-    content_hash: str | None = Field(default=None, pattern=CONTENT_HASH_PATTERN)
     status: str
     chunk_count: int = 0
     size_bytes: int = 0
