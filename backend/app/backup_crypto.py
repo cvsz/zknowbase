@@ -2,6 +2,7 @@ import base64
 import binascii
 import os
 from pathlib import Path
+from typing import BinaryIO
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -15,6 +16,11 @@ AAD = b"zknowbase-backup-envelope-v1"
 
 class BackupCryptoError(RuntimeError):
     pass
+
+
+def _open_private_exclusive(path: Path) -> BinaryIO:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    return os.fdopen(fd, "wb")
 
 
 def load_key_file(path: Path) -> bytes:
@@ -44,14 +50,13 @@ def encrypt_archive(source: Path, output: Path, key: bytes) -> None:
     encryptor = Cipher(algorithms.AES(key), modes.GCM(nonce)).encryptor()
     encryptor.authenticate_additional_data(AAD)
     try:
-        with source.open("rb") as src, output.open("xb") as dst:
+        with source.open("rb") as src, _open_private_exclusive(output) as dst:
             dst.write(MAGIC)
             dst.write(nonce)
             for chunk in iter(lambda: src.read(CHUNK_SIZE), b""):
                 dst.write(encryptor.update(chunk))
             dst.write(encryptor.finalize())
             dst.write(encryptor.tag)
-        os.chmod(output, 0o600)
     except Exception:
         output.unlink(missing_ok=True)
         raise
@@ -75,7 +80,7 @@ def decrypt_archive(source: Path, output: Path, key: bytes) -> None:
             src.seek(len(MAGIC) + NONCE_SIZE)
             decryptor = Cipher(algorithms.AES(key), modes.GCM(nonce, tag)).decryptor()
             decryptor.authenticate_additional_data(AAD)
-            with output.open("xb") as dst:
+            with _open_private_exclusive(output) as dst:
                 remaining = ciphertext_end - src.tell()
                 while remaining:
                     chunk = src.read(min(CHUNK_SIZE, remaining))
