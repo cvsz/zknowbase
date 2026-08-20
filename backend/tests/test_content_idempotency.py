@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
@@ -67,6 +68,95 @@ def test_sync_file_ingestion_returns_existing_document_for_duplicate_bytes(monke
     assert second.status_code == 200
     assert second.json()["document"]["id"] == first.json()["document"]["id"]
     assert second.json()["document"]["name"] == "first.md"
+    assert len(list((tmp_path / "uploads").iterdir())) == 1
+    get_settings.cache_clear()
+
+
+def test_sync_concurrent_duplicate_indexes_only_once(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"X-API-Key": "this-is-a-test-secret-key"}
+    content = b"# Concurrent identity\nOnly the reservation owner may index these bytes."
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+    calls_lock = threading.Lock()
+
+    async def blocking_index(record, text, settings):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        entered.set()
+        assert release.wait(timeout=5)
+        record.status = "ready"
+        record.chunk_count = 1
+        record.updated_at = routes.utcnow()
+        return routes.document_store(settings).upsert(record)
+
+    monkeypatch.setattr(routes, "index_document", blocking_index)
+    first_result = {}
+
+    def first_request():
+        first_result["response"] = client.post(
+            "/api/v1/ingest",
+            headers=headers,
+            files={"file": ("first.md", content, "text/markdown")},
+        )
+
+    thread = threading.Thread(target=first_request)
+    thread.start()
+    assert entered.wait(timeout=5)
+    duplicate = client.post(
+        "/api/v1/ingest",
+        headers=headers,
+        files={"file": ("second.md", content, "text/markdown")},
+    )
+    release.set()
+    thread.join(timeout=5)
+
+    assert duplicate.status_code == 200
+    assert duplicate.json()["document"]["status"] == "processing"
+    assert first_result["response"].status_code == 200
+    assert calls == 1
+    assert len(list((tmp_path / "uploads").iterdir())) == 1
+    get_settings.cache_clear()
+
+
+def test_sync_retry_reuses_existing_source_path(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    settings = get_settings()
+    headers = {"X-API-Key": "this-is-a-test-secret-key"}
+    content = b"retryable text content"
+    doc_id = file_document_id("default", sha256_content(content))
+    old_path = tmp_path / "uploads" / f"{doc_id}.txt"
+    old_path.write_bytes(content)
+    now = datetime.now(timezone.utc)
+    document_store(settings).upsert(
+        DocumentRecord(
+            id=doc_id,
+            name="original.txt",
+            tenant_id="default",
+            source_type="file",
+            source_uri=str(old_path),
+            content_type="text/plain",
+            status="failed",
+            size_bytes=len(content),
+            created_at=now,
+            updated_at=now,
+            error="transient",
+        )
+    )
+
+    response = client.post(
+        "/api/v1/ingest",
+        headers=headers,
+        files={"file": ("renamed.md", content, "text/markdown")},
+    )
+
+    assert response.status_code == 200
+    restored = document_store(settings).get(doc_id)
+    assert restored is not None
+    assert restored.source_uri == str(old_path)
+    assert old_path.exists()
     assert len(list((tmp_path / "uploads").iterdir())) == 1
     get_settings.cache_clear()
 
