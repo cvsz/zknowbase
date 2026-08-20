@@ -124,6 +124,23 @@ async def test_encrypted_backup_tamper_fails_before_restore(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_truncated_encrypted_backup_fails_before_restore(monkeypatch, tmp_path):
+    settings = _settings(tmp_path, _key_file(tmp_path), require=True)
+    _seed(settings)
+    monkeypatch.setattr(backup, "QdrantSnapshots", FakeQdrantSnapshots)
+    archive = await backup.create_backup(settings)
+
+    payload = archive.read_bytes()
+    truncated = tmp_path / "truncated.zkb"
+    truncated.write_bytes(payload[:-16])
+
+    with pytest.raises(backup.BackupError):
+        await backup.restore_backup(settings, truncated, yes=True, safety_backup=False)
+    assert DocumentStore(settings.metadata_db).get("doc-enc") is not None
+    assert (settings.upload_dir / "doc-enc.md").read_text(encoding="utf-8") == "encrypted backup knowledge"
+
+
+@pytest.mark.asyncio
 async def test_wrong_backup_key_is_rejected(monkeypatch, tmp_path):
     settings = _settings(tmp_path, _key_file(tmp_path, b"a"), require=True)
     _seed(settings)
