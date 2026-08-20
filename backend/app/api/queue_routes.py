@@ -15,6 +15,7 @@ from app.models.schemas import (
 from app.observability import INGESTION_JOBS
 from app.rag.loaders import ALLOWED_SUFFIXES
 from app.store_factory import document_store, ingestion_queue
+from app.upload_security import UploadSecurity, UploadSecurityError
 
 router = APIRouter()
 
@@ -38,6 +39,10 @@ async def enqueue_file(
     data = await file.read(max_bytes + 1)
     if len(data) > max_bytes:
         raise HTTPException(413, "File exceeds upload limit")
+    try:
+        await UploadSecurity(settings).inspect(filename, data)
+    except UploadSecurityError as exc:
+        raise HTTPException(422, f"Upload rejected: {exc}") from exc
 
     content_hash = sha256_content(data)
     doc_id = file_document_id(principal.tenant_id, content_hash)
