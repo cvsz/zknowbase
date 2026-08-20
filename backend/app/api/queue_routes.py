@@ -50,7 +50,9 @@ async def enqueue_file(
     docs = document_store(settings)
     queue = ingestion_queue(settings)
     existing = docs.get(doc_id)
-    if existing is not None and existing.tenant_id == principal.tenant_id:
+    if existing is not None and existing.tenant_id != principal.tenant_id:
+        raise HTTPException(409, "Document content identity collides with another tenant")
+    if existing is not None:
         if existing.status not in {"failed", "cancelled"} or queue.active_for_document(
             doc_id, principal.tenant_id
         ):
