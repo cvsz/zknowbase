@@ -205,8 +205,9 @@ class SQLiteIngestionQueue:
                 """
                 UPDATE ingestion_jobs SET lease_expires_at=?, updated_at=?
                 WHERE id=? AND status='processing' AND worker_id=?
+                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
                 """,
-                (lease.isoformat(), now.isoformat(), job_id, worker_id),
+                (lease.isoformat(), now.isoformat(), job_id, worker_id, now.isoformat()),
             )
             conn.commit()
             return cur.rowcount == 1
@@ -220,8 +221,9 @@ class SQLiteIngestionQueue:
                 SET status='completed', worker_id=NULL, lease_expires_at=NULL,
                     updated_at=?, error=NULL
                 WHERE id=? AND status='processing' AND worker_id=?
+                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
                 """,
-                (now, job_id, worker_id),
+                (now, job_id, worker_id, now),
             )
             conn.commit()
             return cur.rowcount == 1
@@ -234,8 +236,9 @@ class SQLiteIngestionQueue:
                 """
                 SELECT attempts,max_attempts FROM ingestion_jobs
                 WHERE id=? AND status='processing' AND worker_id=?
+                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
                 """,
-                (job_id, worker_id),
+                (job_id, worker_id, now),
             ).fetchone()
             if not row:
                 return False
@@ -245,8 +248,9 @@ class SQLiteIngestionQueue:
                 UPDATE ingestion_jobs
                 SET status=?, worker_id=NULL, lease_expires_at=NULL, updated_at=?, error=?
                 WHERE id=? AND status='processing' AND worker_id=?
+                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
                 """,
-                (next_status, now, bounded_error, job_id, worker_id),
+                (next_status, now, bounded_error, job_id, worker_id, now),
             )
             conn.commit()
             return cur.rowcount == 1
@@ -447,8 +451,9 @@ class PostgresIngestionQueue:
                 """
                 UPDATE ingestion_jobs SET lease_expires_at=%s, updated_at=%s
                 WHERE id=%s AND status='processing' AND worker_id=%s
+                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= %s
                 """,
-                (lease, now, job_id, worker_id),
+                (lease, now, job_id, worker_id, now),
             )
             return cur.rowcount == 1
 
@@ -461,8 +466,9 @@ class PostgresIngestionQueue:
                 SET status='completed', worker_id=NULL, lease_expires_at=NULL,
                     updated_at=%s, error=NULL
                 WHERE id=%s AND status='processing' AND worker_id=%s
+                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= %s
                 """,
-                (now, job_id, worker_id),
+                (now, job_id, worker_id, now),
             )
             return cur.rowcount == 1
 
@@ -475,9 +481,10 @@ class PostgresIngestionQueue:
                     """
                     SELECT attempts,max_attempts FROM ingestion_jobs
                     WHERE id=%s AND status='processing' AND worker_id=%s
+                      AND lease_expires_at IS NOT NULL AND lease_expires_at >= %s
                     FOR UPDATE
                     """,
-                    (job_id, worker_id),
+                    (job_id, worker_id, now),
                 ).fetchone()
                 if not row:
                     return False
@@ -488,8 +495,9 @@ class PostgresIngestionQueue:
                     SET status=%s, worker_id=NULL, lease_expires_at=NULL,
                         updated_at=%s, error=%s
                     WHERE id=%s AND status='processing' AND worker_id=%s
+                      AND lease_expires_at IS NOT NULL AND lease_expires_at >= %s
                     """,
-                    (next_status, now, bounded_error, job_id, worker_id),
+                    (next_status, now, bounded_error, job_id, worker_id, now),
                 )
                 return cur.rowcount == 1
 

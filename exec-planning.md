@@ -299,6 +299,8 @@ Acceptance: operators can diagnose ingestion and retrieval quality without shell
 
 Acceptance: representative dependency failures recover without cross-tenant leakage, duplicate destructive mutation, stuck leases, or uncontrolled resource growth.
 
+Evidence status: partial queue-resilience evidence is recorded in `docs/S23-QUEUE-RESILIENCE-EVIDENCE.md`; it covers stale lease mutation rejection and SQLite multi-worker claim uniqueness. S23 remains incomplete until the remaining Postgres multi-worker/load, dependency outage/recovery, bounded resource-growth, shutdown/drain, and capacity/SLO evidence is recorded.
+
 ### S24 — Governed zworkforce knowledge capabilities v2
 - [ ] refresh `cvsz/zworkforce` consumer contract before changes
 - [ ] add optional structured retrieval metadata needed for governed agent decisions without exposing internal vector-store access
