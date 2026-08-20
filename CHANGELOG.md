@@ -2,6 +2,19 @@
 
 All notable production changes to zknowbase are documented here.
 
+## Unreleased — v0.2.0
+
+### Added
+
+- Started the post-release production feedback cycle with a structured intake/triage contract, severity rubric, sanitization rules, and a GitHub issue form.
+- Added an evidence-driven v0.2.0 roadmap covering observability/SLO calibration, DR/reliability, tenant/encryption policy, performance/cost, SDK/zworkforce contracts, Admin operations, compatibility, security audits, and release gates.
+
+### Compatibility
+
+- v0.1.0 remains an immutable baseline at tag `v0.1.0` / commit `b27352d64b200b79739653921c82551d4e06b7d6`.
+- No v0.2.0 planning artifact moves or rewrites that tag. Additive, forward-only, restart-safe changes and backward-compatible backup readers are required by default.
+
+
 ## 0.1.0 — 2026-08-19
 
 Initial production release candidate for the self-hosted zknowbase knowledge platform.
