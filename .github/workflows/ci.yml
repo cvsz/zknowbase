@@ -57,6 +57,39 @@ jobs:
       - run: python -m ruff check app tests
       - run: python -m pytest -q
 
+  retrieval-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Run deterministic retrieval quality gate
+        run: >-
+          python scripts/evaluate_retrieval.py
+          --dataset eval/retrieval-quality-v1.json
+          --output retrieval-quality-report.json
+          --min-recall 0.80
+          --min-mrr 0.80
+          --min-ndcg 0.80
+          --min-citation-hit-rate 0.80
+          --require-hybrid-not-worse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: retrieval-quality-${{ github.sha }}
+          path: backend/retrieval-quality-report.json
+          if-no-files-found: error
+          retention-days: 30
+
   performance:
     runs-on: ubuntu-latest
     timeout-minutes: 10

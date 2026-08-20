@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "parental-leave-policy",
+      "question": "How many weeks of parental leave are provided?",
+      "tenant_id": "acme",
+      "expected_document_ids": ["benefits-parental-leave"],
+      "top_k": 1,
+      "answer_must_contain": ["sixteen weeks"],
+      "answer": "The parental leave policy provides sixteen weeks of leave.",
+      "candidates": [
+        {
+          "document_id": "benefits-general",
+          "document_name": "benefits-general.md",
+          "dense_score": 0.91,
+          "text": "General employee benefits include travel support and wellness allowances."
+        },
+        {
+          "document_id": "benefits-parental-leave",
+          "document_name": "parental-leave.md",
+          "dense_score": 0.72,
+          "text": "The parental leave policy provides sixteen weeks of paid parental leave."
+        },
+        {
+          "document_id": "expenses",
+          "document_name": "expenses.md",
+          "dense_score": 0.68,
+          "text": "Expense reports must be submitted within thirty days."
+        }
+      ]
+    },
+    {
+      "id": "incident-retention",
+      "question": "How long are security incident records retained?",
+      "tenant_id": "acme",
+      "expected_document_ids": ["security-retention"],
+      "top_k": 1,
+      "answer_must_contain": ["seven years"],
+      "answer": "Security incident records are retained for seven years.",
+      "candidates": [
+        {
+          "document_id": "security-retention",
+          "document_name": "security-retention.md",
+          "dense_score": 0.88,
+          "text": "Security incident records are retained for seven years for audit and compliance."
+        },
+        {
+          "document_id": "security-response",
+          "document_name": "incident-response.md",
+          "dense_score": 0.83,
+          "text": "Security incidents are triaged according to severity and containment impact."
+        },
+        {
+          "document_id": "logs-retention",
+          "document_name": "logs.md",
+          "dense_score": 0.70,
+          "text": "Application logs use a shorter operational retention window."
+        }
+      ]
+    },
+    {
+      "id": "tenant-vector-boundary",
+      "question": "What enforces tenant isolation for vector search?",
+      "tenant_id": "acme",
+      "expected_document_ids": ["tenant-vector-isolation"],
+      "top_k": 1,
+      "answer_must_contain": ["tenant payload filter"],
+      "answer": "Vector search enforces a server-authoritative tenant payload filter on the shared collection.",
+      "candidates": [
+        {
+          "document_id": "tenant-vector-isolation",
+          "document_name": "tenant-isolation.md",
+          "dense_score": 0.93,
+          "text": "Every vector operation on the shared Qdrant collection applies the authenticated tenant payload filter."
+        },
+        {
+          "document_id": "qdrant-operations",
+          "document_name": "qdrant-operations.md",
+          "dense_score": 0.77,
+          "text": "Qdrant stores dense vectors and supports snapshot recovery."
+        },
+        {
+          "document_id": "service-keys",
+          "document_name": "service-keys.md",
+          "dense_score": 0.66,
+          "text": "Service keys are scoped and persisted only as hashes."
+        }
+      ]
+    }
+  ]
+}
