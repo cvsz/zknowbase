@@ -337,6 +337,17 @@ or
 
 Do not mark S18-S25 complete based on intent, partial implementation, local-only assumptions, or documentation without executable evidence.
 
+
+## Post-release v0.2.0 feedback cycle
+
+The immutable release baseline is tag `v0.1.0` at commit `b27352d64b200b79739653921c82551d4e06b7d6`. It must not be rewritten, moved, or retagged. The current post-release planning artifacts are `ROADMAP-v0.2.0.md`, `docs/PRODUCTION-FEEDBACK.md`, and `.github/ISSUE_TEMPLATE/production-feedback.yml`.
+
+The first bounded vertical slice is operational feedback intake and triage. It is documentation/issue-form only: it does not change API, tenant authorization, storage, backup format, cryptography, SDK behavior, or the zworkforce trust boundary. Production observations must be sanitized, tied to an exact commit/version and UTC evidence, and triaged using P0-P3 impact criteria. Security reports continue through `SECURITY.md` and must not be disclosed in public issues.
+
+Compatibility policy for v0.2.0: additive changes are the default; v0.1.0 API/SDK/storage/backup readers remain supported; migrations are forward-only and restart-safe; new backup writers document minimum reader version and preserve tenant/security metadata; SDK/governed-context changes require versioned fields, tolerant readers, fail-closed authorization, and consumer evidence. Any breaking or irreversible change requires an explicit reviewed deprecation/migration plan and release-gate evidence.
+
+Evidence-based next actions, in order: collect sanitized production feedback; calibrate SLOs from representative workloads; repeat DR/restore and compatibility drills; mature tenant/encryption policy; measure performance/cost; then evolve SDK/zworkforce and Admin operations. S18-S25 remain unchecked until executable evidence and exact-head gates prove completion.
+
 ## Post-v0.1 execution priority
 1. Fix any regression or failing CI/security gate on `main` first.
 2. S18 repository governance and release safety.
