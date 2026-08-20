@@ -57,6 +57,50 @@ def test_postgres_document_crud():
         pool.close()
 
 
+def test_postgres_document_reservation_is_single_owner_and_retryable():
+    assert POSTGRES_URL is not None
+    pool = create_postgres_pool(POSTGRES_URL, min_size=1, max_size=3)
+    store = PostgresDocumentStore(pool)
+    doc_id = str(uuid4())
+    now = store.now()
+    first = DocumentRecord(
+        id=doc_id,
+        tenant_id="tenant-a",
+        name="first.md",
+        source_type="file",
+        source_uri=f"/data/{doc_id}.md",
+        content_type="text/markdown",
+        status="processing",
+        size_bytes=32,
+        created_at=now,
+        updated_at=now,
+    )
+    duplicate = first.model_copy(deep=True)
+    duplicate.name = "duplicate.md"
+    try:
+        assert store.reserve(first) is True
+        assert store.reserve(duplicate) is False
+        loaded = store.get(doc_id)
+        assert loaded is not None
+        assert loaded.name == "first.md"
+
+        loaded.status = "failed"
+        loaded.error = "transient"
+        loaded.updated_at = store.now()
+        store.upsert(loaded)
+        duplicate.updated_at = store.now()
+        duplicate.error = None
+        assert store.reserve(duplicate) is True
+        assert store.reserve(first) is False
+        retried = store.get(doc_id)
+        assert retried is not None
+        assert retried.name == "duplicate.md"
+        assert retried.status == "processing"
+    finally:
+        store.delete(doc_id)
+        pool.close()
+
+
 def test_postgres_key_rotation_and_audit():
     assert POSTGRES_URL is not None
     pool = create_postgres_pool(POSTGRES_URL, min_size=1, max_size=2)
