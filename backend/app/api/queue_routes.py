@@ -46,7 +46,6 @@ async def enqueue_file(
 
     content_hash = sha256_content(data)
     doc_id = file_document_id(principal.tenant_id, content_hash)
-    saved = settings.upload_dir / f"{doc_id}{suffix}"
     docs = document_store(settings)
     queue = ingestion_queue(settings)
     existing = docs.get(doc_id)
@@ -66,6 +65,10 @@ async def enqueue_file(
                 },
             )
 
+    if existing is not None and existing.source_type == "file" and existing.source_uri:
+        saved = Path(existing.source_uri)
+    else:
+        saved = settings.upload_dir / f"{doc_id}{suffix}"
     now = docs.now()
     record = DocumentRecord(
         id=doc_id,
@@ -80,8 +83,23 @@ async def enqueue_file(
         updated_at=now,
     )
 
+    if not docs.reserve(record):
+        current = docs.get(doc_id)
+        if current is None:
+            raise HTTPException(409, "Document content reservation changed; retry request")
+        if current.tenant_id != principal.tenant_id:
+            raise HTTPException(409, "Document content identity collides with another tenant")
+        raise HTTPException(
+            409,
+            detail={
+                "message": "Duplicate file content already exists for this tenant",
+                "document_id": current.id,
+                "status": current.status,
+                "content_hash": f"sha256:{content_hash}",
+            },
+        )
+
     try:
-        docs.upsert(record)
         saved.write_bytes(data)
         job = queue.enqueue(
             record.id,
@@ -90,11 +108,21 @@ async def enqueue_file(
             settings.ingestion_job_max_attempts,
             tenant_id=principal.tenant_id,
         )
-        INGESTION_JOBS.labels(outcome="enqueued").inc()
     except Exception as exc:
-        saved.unlink(missing_ok=True)
-        docs.delete(record.id)
+        # Some queue backends may fail after durably recording a job. Preserve
+        # the reservation/source if a job is now active so the worker never loses
+        # state owned by a successful enqueue.
+        if not queue.active_for_document(doc_id, principal.tenant_id):
+            saved.unlink(missing_ok=True)
+            current = docs.get(record.id)
+            if (
+                current is not None
+                and current.tenant_id == principal.tenant_id
+                and current.status == "queued"
+            ):
+                docs.delete(record.id)
         raise HTTPException(503, f"Unable to queue ingestion: {exc}") from exc
+    INGESTION_JOBS.labels(outcome="enqueued").inc()
     return AsyncIngestResponse(document=record, job=job)
 
 
