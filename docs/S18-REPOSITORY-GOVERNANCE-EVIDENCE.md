@@ -72,13 +72,23 @@ reported `mergeStateStatus: CLEAN` and successful CI/Security check rollups.
 They still require the configured review and conversation gates before normal
 merge.
 
+This is partial evidence only. It verifies the configured branch-protection
+shape and shows that open PRs are evaluated by the required checks, but it does
+not yet prove the complete S18 acceptance path. S18 remains incomplete until the
+repository records both:
+
+- a deliberately failing PR that GitHub blocks from normal merge; and
+- a green PR that successfully merges through the normal protected path.
+
 ## Acceptance Mapping
 
 - Failing PRs cannot merge through the normal path because every PR targeting
   `main` must satisfy the listed current required checks, review, code-owner,
-  up-to-date, and conversation-resolution gates.
+  up-to-date, and conversation-resolution gates. GitHub-observable proof of a
+  deliberately failing PR being blocked is still required.
 - Green PRs can proceed through the normal path after required review and code
-  owner gates are satisfied.
+  owner gates are satisfied. GitHub-observable proof of a green PR successfully
+  merging through that path is still required.
 - Direct `main` pushes, force pushes, and branch deletion are disabled by policy.
 - Emergency changes use the documented hotfix process and must record any
   temporary governance change as explicit release evidence.

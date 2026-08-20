@@ -240,13 +240,17 @@ Release evidence: release-candidate commit `e9ea3d69fca21bf21b3323cd289f1b5edab3
 - [x] define emergency/break-glass procedure without silently bypassing evidence requirements
 - [x] add CODEOWNERS/reviewer ownership for backend security, frontend auth, operations, and release-sensitive paths where appropriate
 - [x] document release/tag provenance and post-release hotfix procedure
+- [ ] record GitHub-observable evidence that a deliberately failing PR cannot merge through the normal path
+- [ ] record GitHub-observable evidence that a green PR can merge through the normal path
 
 Acceptance: a deliberately failing PR cannot merge through the normal path, a green PR can merge, and the governance configuration is recorded as release evidence.
 
-Evidence: `main` branch protection was configured on 2026-08-20 with required
-current CI/Security checks, strict up-to-date status checks, required review,
-code-owner review, stale-review dismissal, required conversation resolution,
-administrator enforcement, and force-push/deletion disabled. See
+Evidence status: partial. `main` branch protection was configured on 2026-08-20
+with required current CI/Security checks, strict up-to-date status checks,
+required review, code-owner review, stale-review dismissal, required
+conversation resolution, administrator enforcement, and force-push/deletion
+disabled. S18 remains incomplete until the failing-PR denial path and green-PR
+merge path are recorded as GitHub-observable evidence. See
 `docs/S18-REPOSITORY-GOVERNANCE-EVIDENCE.md` and `docs/RELEASE-SAFETY.md`.
 
 ### S19 — Native portable-backup confidentiality
