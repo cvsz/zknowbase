@@ -1,13 +1,15 @@
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 
 from app.content_identity import file_document_id, sha256_content
 from app.core.config import Settings, get_settings
 from app.core.security import Principal, require_scopes
 from app.models.schemas import (
     AsyncIngestResponse,
+    AsyncReindexRequest,
     DocumentRecord,
     IngestionJobRecord,
     UrlIngestRequest,
@@ -15,6 +17,7 @@ from app.models.schemas import (
 from app.observability import INGESTION_JOBS
 from app.rag.loaders import ALLOWED_SUFFIXES
 from app.store_factory import document_store, ingestion_queue
+from app.tenant_queue_store import ActiveIngestionJobError
 from app.upload_security import UploadSecurity, UploadSecurityError
 
 router = APIRouter()
@@ -167,6 +170,68 @@ def enqueue_url(
     return AsyncIngestResponse(document=record, job=job)
 
 
+@router.post(
+    "/documents/{doc_id}/reindex/async",
+    response_model=AsyncIngestResponse,
+    status_code=202,
+)
+def enqueue_reindex(
+    doc_id: str,
+    body: AsyncReindexRequest = Body(default_factory=AsyncReindexRequest),
+    principal: Principal = Depends(require_scopes("knowledge:write")),
+    settings: Settings = Depends(get_settings),
+) -> AsyncIngestResponse:
+    docs = document_store(settings)
+    record = docs.get(doc_id)
+    if record is None or record.tenant_id != principal.tenant_id:
+        raise HTTPException(404, "Document not found")
+    if not record.source_uri:
+        raise HTTPException(409, "Document source is unavailable")
+    if record.source_type not in {"file", "url"}:
+        raise HTTPException(422, f"Unsupported reindex source type: {record.source_type}")
+
+    queue = ingestion_queue(settings)
+    if queue.active_for_document(doc_id, principal.tenant_id):
+        raise HTTPException(409, "Document has an active ingestion job")
+
+    prior_status = record.status
+    prior_error = record.error
+    prior_updated_at = record.updated_at
+    now = docs.now()
+    available_at = now + timedelta(seconds=body.run_after_seconds)
+    record.status = "queued"
+    record.error = None
+    record.updated_at = now
+    docs.upsert(record)
+    try:
+        job = queue.enqueue_if_inactive(
+            record.id,
+            record.source_type,
+            record.source_uri,
+            settings.ingestion_job_max_attempts,
+            available_at=available_at,
+            tenant_id=principal.tenant_id,
+            prior_status=prior_status,
+            prior_error=prior_error,
+            prior_updated_at=prior_updated_at,
+        )
+    except ActiveIngestionJobError as exc:
+        # Another concurrent request won the database-level reservation after the
+        # optimistic pre-check. Its active job owns the queued document state.
+        raise HTTPException(409, "Document has an active ingestion job") from exc
+    except Exception as exc:
+        # The tenant queue insert is atomic. Restore the exact prior state only if
+        # no concurrent request successfully established an active job.
+        if not queue.active_for_document(doc_id, principal.tenant_id):
+            record.status = prior_status
+            record.error = prior_error
+            record.updated_at = prior_updated_at
+            docs.upsert(record)
+        raise HTTPException(503, f"Unable to queue reindex: {exc}") from exc
+    INGESTION_JOBS.labels(outcome="enqueued").inc()
+    return AsyncIngestResponse(document=record, job=job)
+
+
 @router.get(
     "/ingest/jobs",
     response_model=list[IngestionJobRecord],
@@ -207,12 +272,23 @@ def cancel_ingestion_job(
     job = queue.get(job_id, principal.tenant_id)
     if job is None:
         raise HTTPException(404, "Ingestion job not found")
+    prior_reindex_state = queue.reindex_prior_state(job_id, principal.tenant_id)
     if not queue.cancel(job_id, principal.tenant_id):
         raise HTTPException(409, "Only queued ingestion jobs can be cancelled")
     INGESTION_JOBS.labels(outcome="cancelled").inc()
 
     docs = document_store(settings)
     record = docs.get(job.document_id)
+    if prior_reindex_state is not None:
+        if record is not None and record.tenant_id == principal.tenant_id:
+            prior_status, prior_error, prior_updated_at = prior_reindex_state
+            record.status = prior_status
+            record.error = prior_error
+            record.updated_at = prior_updated_at
+            docs.upsert(record)
+        queue.clear_reindex_state(job_id)
+        return
+
     if record is not None and record.tenant_id == principal.tenant_id:
         record.status = "cancelled"
         record.updated_at = docs.now()

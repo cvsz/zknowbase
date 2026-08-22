@@ -37,6 +37,10 @@ class UrlIngestRequest(BaseModel):
     url: HttpUrl
 
 
+class AsyncReindexRequest(BaseModel):
+    run_after_seconds: int = Field(default=0, ge=0, le=31_536_000)
+
+
 class ChunkPreview(BaseModel):
     index: int
     text: str
@@ -135,6 +139,7 @@ class IngestionJobRecord(BaseModel):
     max_attempts: int = 3
     worker_id: str | None = None
     lease_expires_at: datetime | None = None
+    available_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     error: str | None = None
