@@ -1,12 +1,17 @@
 .env
+.env.*
+.zknowbase-admin-credentials
+docker-compose.override.yml
 .venv/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.pyc
 backend/data/
+backend/retrieval-quality-report.json
 frontend/.next/
 frontend/node_modules/
+frontend/node_modules.corrupt-*/
 .DS_Store
 coverage.xml
 htmlcov/
