@@ -43,7 +43,27 @@ def bm25_scores(query: str, documents: list[str], *, k1: float = 1.5, b: float =
     return scores
 
 
-def rerank_hybrid(query: str, candidates: list[SourceCitation], top_k: int, *, dense_weight: float = 0.65) -> list[SourceCitation]:
+def _top_unique_documents(candidates: list[SourceCitation], top_k: int) -> list[SourceCitation]:
+    selected: list[SourceCitation] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate.document_id in seen:
+            continue
+        seen.add(candidate.document_id)
+        selected.append(candidate)
+        if len(selected) >= top_k:
+            break
+    return selected
+
+
+def rerank_hybrid(
+    query: str,
+    candidates: list[SourceCitation],
+    top_k: int,
+    *,
+    dense_weight: float = 0.65,
+    document_level_cutoff: bool = False,
+) -> list[SourceCitation]:
     """Fuse dense similarity with local BM25 over dense candidates.
 
     Candidate generation remains Qdrant-backed, so filters and collection boundaries
@@ -60,4 +80,7 @@ def rerank_hybrid(query: str, candidates: list[SourceCitation], top_k: int, *, d
         key=lambda item: dense_weight * max(0.0, min(1.0, item[0].score)) + lexical_weight * item[1],
         reverse=True,
     )
-    return [candidate for candidate, _ in ranked[:top_k]]
+    reranked = [candidate for candidate, _ in ranked]
+    if document_level_cutoff:
+        return _top_unique_documents(reranked, top_k)
+    return reranked[:top_k]
