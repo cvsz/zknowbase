@@ -139,6 +139,42 @@ class TenantIngestionQueue:
         job.tenant_id = self._tenant_for(job.id)
         return job
 
+    def _tenant_job_ids(self, tenant_id: str, limit: int) -> list[str]:
+        """Select tenant-owned jobs before applying the caller's bounded limit.
+
+        Unmapped legacy rows are treated as default-tenant rows, matching `_tenant_for`,
+        without globally backfilling the mapping table on every list request.
+        """
+        bounded_limit = max(1, min(limit, 1000))
+        if self.postgres_pool is not None:
+            with self.postgres_pool.connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT j.id
+                    FROM ingestion_jobs AS j
+                    LEFT JOIN ingestion_job_tenants AS t ON t.job_id=j.id
+                    WHERE COALESCE(t.tenant_id, %s)=%s
+                    ORDER BY j.created_at DESC
+                    LIMIT %s
+                    """,
+                    (self.default_tenant_id, tenant_id, bounded_limit),
+                ).fetchall()
+            return [str(row["id"]) for row in rows]
+        assert self.sqlite_path is not None
+        with sqlite3.connect(self.sqlite_path, timeout=5.0) as conn:
+            rows = conn.execute(
+                """
+                SELECT j.id
+                FROM ingestion_jobs AS j
+                LEFT JOIN ingestion_job_tenants AS t ON t.job_id=j.id
+                WHERE COALESCE(t.tenant_id, ?)=?
+                ORDER BY j.created_at DESC
+                LIMIT ?
+                """,
+                (self.default_tenant_id, tenant_id, bounded_limit),
+            ).fetchall()
+        return [str(row[0]) for row in rows]
+
     def enqueue(
         self,
         document_id: str,
@@ -167,19 +203,50 @@ class TenantIngestionQueue:
         return job
 
     def list(self, limit: int = 100, tenant_id: str | None = None) -> list[IngestionJobRecord]:
-        jobs = [self._attach(job) for job in self.base.list(limit)]
-        attached = [job for job in jobs if job is not None]
         if tenant_id is None:
-            return attached
-        return [job for job in attached if job.tenant_id == tenant_id]
+            jobs = [self._attach(job) for job in self.base.list(limit)]
+            return [job for job in jobs if job is not None]
+
+        attached: list[IngestionJobRecord] = []
+        for job_id in self._tenant_job_ids(tenant_id, limit):
+            job = self._attach(self.base.get(job_id))
+            if job is not None and job.tenant_id == tenant_id:
+                attached.append(job)
+        return attached
 
     def active_for_document(self, document_id: str, tenant_id: str | None = None) -> bool:
         if tenant_id is None:
             return self.base.active_for_document(document_id)
-        return any(
-            job.document_id == document_id and job.status in {"queued", "processing"}
-            for job in self.list(500, tenant_id)
-        )
+        if self.postgres_pool is not None:
+            with self.postgres_pool.connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT 1
+                    FROM ingestion_jobs AS j
+                    LEFT JOIN ingestion_job_tenants AS t ON t.job_id=j.id
+                    WHERE j.document_id=%s
+                      AND j.status IN ('queued','processing')
+                      AND COALESCE(t.tenant_id, %s)=%s
+                    LIMIT 1
+                    """,
+                    (document_id, self.default_tenant_id, tenant_id),
+                ).fetchone()
+            return row is not None
+        assert self.sqlite_path is not None
+        with sqlite3.connect(self.sqlite_path, timeout=5.0) as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM ingestion_jobs AS j
+                LEFT JOIN ingestion_job_tenants AS t ON t.job_id=j.id
+                WHERE j.document_id=?
+                  AND j.status IN ('queued','processing')
+                  AND COALESCE(t.tenant_id, ?)=?
+                LIMIT 1
+                """,
+                (document_id, self.default_tenant_id, tenant_id),
+            ).fetchone()
+        return row is not None
 
     def reap_expired(self) -> list[IngestionJobRecord]:
         return [job for job in (self._attach(item) for item in self.base.reap_expired()) if job is not None]
