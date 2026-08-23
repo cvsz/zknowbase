@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from app.queue_store import SQLiteIngestionQueue
 
 
@@ -83,3 +85,53 @@ def test_sqlite_queue_reaps_terminal_expired_lease(tmp_path):
     assert changed[0].status == "failed"
     assert changed[0].error == "job lease expired"
     assert queue.active_for_document("doc-expired") is False
+
+
+def test_sqlite_queue_rejects_worker_mutation_after_lease_expiry(tmp_path):
+    queue = SQLiteIngestionQueue(tmp_path / "queue.db")
+    job = queue.enqueue("doc-stale", "file", "/data/stale.txt", max_attempts=2)
+    claimed = queue.claim_next("worker-a", lease_seconds=60)
+    assert claimed is not None
+
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE ingestion_jobs SET lease_expires_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+            (job.id,),
+        )
+        conn.commit()
+
+    assert queue.renew(job.id, "worker-a", 60) is False
+    assert queue.complete(job.id, "worker-a") is False
+    assert queue.fail(job.id, "worker-a", "stale failure") is False
+
+    changed = queue.reap_expired()
+    assert len(changed) == 1
+    assert changed[0].id == job.id
+    assert changed[0].status == "queued"
+    assert changed[0].worker_id is None
+
+
+def test_sqlite_queue_concurrent_workers_claim_each_job_once(tmp_path):
+    db_path = tmp_path / "queue.db"
+    queue = SQLiteIngestionQueue(db_path)
+    jobs = [
+        queue.enqueue(f"doc-concurrent-{index}", "file", f"/data/{index}.txt")
+        for index in range(20)
+    ]
+
+    def claim_all(worker_index: int) -> list[str]:
+        worker_queue = SQLiteIngestionQueue(db_path)
+        claimed_ids: list[str] = []
+        while claimed := worker_queue.claim_next(f"worker-{worker_index}", lease_seconds=60):
+            claimed_ids.append(claimed.id)
+        return claimed_ids
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        claimed = [
+            job_id
+            for worker_claims in pool.map(claim_all, range(4))
+            for job_id in worker_claims
+        ]
+
+    assert sorted(claimed) == sorted(job.id for job in jobs)
+    assert len(set(claimed)) == len(jobs)
