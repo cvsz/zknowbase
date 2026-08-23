@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -129,7 +129,6 @@ class SQLiteIngestionQueue:
         return row is not None
 
     def reap_expired(self) -> list[IngestionJobRecord]:
-        now = self.now()
         changed: list[IngestionJobRecord] = []
         with self._lock, self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -137,10 +136,9 @@ class SQLiteIngestionQueue:
                 """
                 SELECT * FROM ingestion_jobs
                 WHERE status='processing' AND lease_expires_at IS NOT NULL
-                  AND lease_expires_at < ?
+                  AND julianday(lease_expires_at) < julianday('now')
                 ORDER BY created_at ASC
-                """,
-                (now.isoformat(),),
+                """
             ).fetchall()
             for row in rows:
                 next_status = "failed" if row["attempts"] >= row["max_attempts"] else "queued"
@@ -149,10 +147,10 @@ class SQLiteIngestionQueue:
                     """
                     UPDATE ingestion_jobs
                     SET status=?, worker_id=NULL, lease_expires_at=NULL,
-                        updated_at=?, error=?
+                        updated_at=strftime('%Y-%m-%dT%H:%M:%f+00:00','now'), error=?
                     WHERE id=? AND status='processing'
                     """,
-                    (next_status, now.isoformat(), error, row["id"]),
+                    (next_status, error, row["id"]),
                 )
                 updated = conn.execute(
                     "SELECT * FROM ingestion_jobs WHERE id=?",
@@ -164,8 +162,7 @@ class SQLiteIngestionQueue:
         return changed
 
     def claim_next(self, worker_id: str, lease_seconds: int = 300) -> IngestionJobRecord | None:
-        now = self.now()
-        lease = now + timedelta(seconds=lease_seconds)
+        lease_modifier = f"+{lease_seconds} seconds"
         with self._lock, self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -182,10 +179,11 @@ class SQLiteIngestionQueue:
                 """
                 UPDATE ingestion_jobs
                 SET status='processing', attempts=attempts+1, worker_id=?,
-                    lease_expires_at=?, updated_at=?, error=NULL
+                    lease_expires_at=strftime('%Y-%m-%dT%H:%M:%f+00:00','now', ?),
+                    updated_at=strftime('%Y-%m-%dT%H:%M:%f+00:00','now'), error=NULL
                 WHERE id=? AND status='queued'
                 """,
-                (worker_id, lease.isoformat(), now.isoformat(), row["id"]),
+                (worker_id, lease_modifier, row["id"]),
             )
             if cur.rowcount != 1:
                 conn.rollback()
@@ -198,47 +196,49 @@ class SQLiteIngestionQueue:
         return self._to_model(claimed)
 
     def renew(self, job_id: str, worker_id: str, lease_seconds: int) -> bool:
-        now = self.now()
-        lease = now + timedelta(seconds=lease_seconds)
+        lease_modifier = f"+{lease_seconds} seconds"
         with self._lock, self._connect() as conn:
             cur = conn.execute(
                 """
-                UPDATE ingestion_jobs SET lease_expires_at=?, updated_at=?
+                UPDATE ingestion_jobs
+                SET lease_expires_at=strftime('%Y-%m-%dT%H:%M:%f+00:00','now', ?),
+                    updated_at=strftime('%Y-%m-%dT%H:%M:%f+00:00','now')
                 WHERE id=? AND status='processing' AND worker_id=?
-                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
+                  AND lease_expires_at IS NOT NULL
+                  AND julianday(lease_expires_at) >= julianday('now')
                 """,
-                (lease.isoformat(), now.isoformat(), job_id, worker_id, now.isoformat()),
+                (lease_modifier, job_id, worker_id),
             )
             conn.commit()
             return cur.rowcount == 1
 
     def complete(self, job_id: str, worker_id: str) -> bool:
-        now = self.now().isoformat()
         with self._lock, self._connect() as conn:
             cur = conn.execute(
                 """
                 UPDATE ingestion_jobs
                 SET status='completed', worker_id=NULL, lease_expires_at=NULL,
-                    updated_at=?, error=NULL
+                    updated_at=strftime('%Y-%m-%dT%H:%M:%f+00:00','now'), error=NULL
                 WHERE id=? AND status='processing' AND worker_id=?
-                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
+                  AND lease_expires_at IS NOT NULL
+                  AND julianday(lease_expires_at) >= julianday('now')
                 """,
-                (now, job_id, worker_id, now),
+                (job_id, worker_id),
             )
             conn.commit()
             return cur.rowcount == 1
 
     def fail(self, job_id: str, worker_id: str, error: str) -> bool:
-        now = self.now().isoformat()
         bounded_error = error[:4000]
         with self._lock, self._connect() as conn:
             row = conn.execute(
                 """
                 SELECT attempts,max_attempts FROM ingestion_jobs
                 WHERE id=? AND status='processing' AND worker_id=?
-                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
+                  AND lease_expires_at IS NOT NULL
+                  AND julianday(lease_expires_at) >= julianday('now')
                 """,
-                (job_id, worker_id, now),
+                (job_id, worker_id),
             ).fetchone()
             if not row:
                 return False
@@ -246,11 +246,13 @@ class SQLiteIngestionQueue:
             cur = conn.execute(
                 """
                 UPDATE ingestion_jobs
-                SET status=?, worker_id=NULL, lease_expires_at=NULL, updated_at=?, error=?
+                SET status=?, worker_id=NULL, lease_expires_at=NULL,
+                    updated_at=strftime('%Y-%m-%dT%H:%M:%f+00:00','now'), error=?
                 WHERE id=? AND status='processing' AND worker_id=?
-                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
+                  AND lease_expires_at IS NOT NULL
+                  AND julianday(lease_expires_at) >= julianday('now')
                 """,
-                (next_status, now, bounded_error, job_id, worker_id, now),
+                (next_status, bounded_error, job_id, worker_id),
             )
             conn.commit()
             return cur.rowcount == 1
@@ -385,7 +387,6 @@ class PostgresIngestionQueue:
         return row is not None
 
     def reap_expired(self) -> list[IngestionJobRecord]:
-        now = self.now()
         changed: list[IngestionJobRecord] = []
         with self.pool.connection() as conn:
             with conn.transaction():
@@ -393,11 +394,10 @@ class PostgresIngestionQueue:
                     """
                     SELECT * FROM ingestion_jobs
                     WHERE status='processing' AND lease_expires_at IS NOT NULL
-                      AND lease_expires_at < %s
+                      AND lease_expires_at < clock_timestamp()
                     ORDER BY created_at ASC
                     FOR UPDATE SKIP LOCKED
-                    """,
-                    (now,),
+                    """
                 ).fetchall()
                 for row in rows:
                     next_status = "failed" if row["attempts"] >= row["max_attempts"] else "queued"
@@ -406,19 +406,17 @@ class PostgresIngestionQueue:
                         """
                         UPDATE ingestion_jobs
                         SET status=%s, worker_id=NULL, lease_expires_at=NULL,
-                            updated_at=%s, error=%s
+                            updated_at=clock_timestamp(), error=%s
                         WHERE id=%s AND status='processing'
                         RETURNING *
                         """,
-                        (next_status, now, error, row["id"]),
+                        (next_status, error, row["id"]),
                     ).fetchone()
                     if updated:
                         changed.append(IngestionJobRecord(**updated))
         return changed
 
     def claim_next(self, worker_id: str, lease_seconds: int = 300) -> IngestionJobRecord | None:
-        now = self.now()
-        lease = now + timedelta(seconds=lease_seconds)
         with self.pool.connection() as conn:
             with conn.transaction():
                 row = conn.execute(
@@ -435,45 +433,46 @@ class PostgresIngestionQueue:
                     """
                     UPDATE ingestion_jobs
                     SET status='processing', attempts=attempts+1, worker_id=%s,
-                        lease_expires_at=%s, updated_at=%s, error=NULL
+                        lease_expires_at=clock_timestamp() + (%s * interval '1 second'),
+                        updated_at=clock_timestamp(), error=NULL
                     WHERE id=%s AND status='queued'
                     RETURNING *
                     """,
-                    (worker_id, lease, now, row["id"]),
+                    (worker_id, lease_seconds, row["id"]),
                 ).fetchone()
                 return IngestionJobRecord(**claimed) if claimed else None
 
     def renew(self, job_id: str, worker_id: str, lease_seconds: int) -> bool:
-        now = self.now()
-        lease = now + timedelta(seconds=lease_seconds)
         with self.pool.connection() as conn:
             cur = conn.execute(
                 """
-                UPDATE ingestion_jobs SET lease_expires_at=%s, updated_at=%s
+                UPDATE ingestion_jobs
+                SET lease_expires_at=clock_timestamp() + (%s * interval '1 second'),
+                    updated_at=clock_timestamp()
                 WHERE id=%s AND status='processing' AND worker_id=%s
-                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= %s
+                  AND lease_expires_at IS NOT NULL
+                  AND lease_expires_at >= clock_timestamp()
                 """,
-                (lease, now, job_id, worker_id, now),
+                (lease_seconds, job_id, worker_id),
             )
             return cur.rowcount == 1
 
     def complete(self, job_id: str, worker_id: str) -> bool:
-        now = self.now()
         with self.pool.connection() as conn:
             cur = conn.execute(
                 """
                 UPDATE ingestion_jobs
                 SET status='completed', worker_id=NULL, lease_expires_at=NULL,
-                    updated_at=%s, error=NULL
+                    updated_at=clock_timestamp(), error=NULL
                 WHERE id=%s AND status='processing' AND worker_id=%s
-                  AND lease_expires_at IS NOT NULL AND lease_expires_at >= %s
+                  AND lease_expires_at IS NOT NULL
+                  AND lease_expires_at >= clock_timestamp()
                 """,
-                (now, job_id, worker_id, now),
+                (job_id, worker_id),
             )
             return cur.rowcount == 1
 
     def fail(self, job_id: str, worker_id: str, error: str) -> bool:
-        now = self.now()
         bounded_error = error[:4000]
         with self.pool.connection() as conn:
             with conn.transaction():
@@ -481,10 +480,11 @@ class PostgresIngestionQueue:
                     """
                     SELECT attempts,max_attempts FROM ingestion_jobs
                     WHERE id=%s AND status='processing' AND worker_id=%s
-                      AND lease_expires_at IS NOT NULL AND lease_expires_at >= %s
+                      AND lease_expires_at IS NOT NULL
+                      AND lease_expires_at >= clock_timestamp()
                     FOR UPDATE
                     """,
-                    (job_id, worker_id, now),
+                    (job_id, worker_id),
                 ).fetchone()
                 if not row:
                     return False
@@ -493,11 +493,12 @@ class PostgresIngestionQueue:
                     """
                     UPDATE ingestion_jobs
                     SET status=%s, worker_id=NULL, lease_expires_at=NULL,
-                        updated_at=%s, error=%s
+                        updated_at=clock_timestamp(), error=%s
                     WHERE id=%s AND status='processing' AND worker_id=%s
-                      AND lease_expires_at IS NOT NULL AND lease_expires_at >= %s
+                      AND lease_expires_at IS NOT NULL
+                      AND lease_expires_at >= clock_timestamp()
                     """,
-                    (next_status, now, bounded_error, job_id, worker_id, now),
+                    (next_status, bounded_error, job_id, worker_id),
                 )
                 return cur.rowcount == 1
 
