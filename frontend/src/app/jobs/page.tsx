@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import type { IngestionJobRecord } from "@/lib/types";
 
 const statuses = ["queued", "processing", "failed", "completed", "cancelled"] as const;
+const JOB_SAMPLE_LIMIT = 100;
 
 function formatTime(value?: string | null) {
   if (!value) return "none";
@@ -29,7 +30,7 @@ export default function JobsPage() {
   async function load() {
     setError("");
     try {
-      setJobs(await api.ingestionJobs(100));
+      setJobs(await api.ingestionJobs(JOB_SAMPLE_LIMIT));
     } catch (err) {
       setError(String(err));
     } finally {
@@ -46,7 +47,7 @@ export default function JobsPage() {
     ])) as Record<IngestionJobRecord["status"], number>;
   }, [jobs]);
 
-  const retryPressure = jobs.filter(job => job.status !== "completed" && job.attempts > 0).length;
+  const retrying = jobs.filter(job => job.status === "queued" && job.attempts > 0).length;
 
   return <section className="space-y-6">
     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -61,15 +62,20 @@ export default function JobsPage() {
 
     {error && <div className="flex items-center gap-2 rounded border border-red-900 bg-red-950/50 p-3 text-sm text-red-200"><AlertTriangle size={16} />{error}</div>}
 
-    <div className="grid gap-3 md:grid-cols-6">
-      {statuses.map(status => <div key={status} className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-        <div className="text-xs uppercase tracking-wide text-slate-500">{status}</div>
-        <div className="mt-2 text-2xl font-semibold">{counts[status]}</div>
-      </div>)}
-      <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-        <div className="text-xs uppercase tracking-wide text-slate-500">retrying</div>
-        <div className="mt-2 text-2xl font-semibold">{retryPressure}</div>
+    <div>
+      <div className="grid gap-3 md:grid-cols-6">
+        {statuses.map(status => <div key={status} className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500">recent {status}</div>
+          <div className="mt-2 text-2xl font-semibold">{counts[status]}</div>
+        </div>)}
+        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500">recent retries</div>
+          <div className="mt-2 text-2xl font-semibold">{retrying}</div>
+        </div>
       </div>
+      <p className="mt-2 text-xs text-slate-500">
+        Cards summarize up to the latest {JOB_SAMPLE_LIMIT} jobs for the current tenant; they are a recent sample, not lifetime totals. Retry count includes queued jobs with one or more prior attempts.
+      </p>
     </div>
 
     <div className="overflow-hidden rounded-lg border border-slate-800">
@@ -86,7 +92,7 @@ export default function JobsPage() {
         </thead>
         <tbody className="divide-y divide-slate-800">
           {loading && <tr><td colSpan={6} className="p-6 text-slate-400"><span className="inline-flex items-center gap-2"><Loader2 size={16} className="animate-spin" />Loading jobs</span></td></tr>}
-          {!loading && jobs.length === 0 && <tr><td colSpan={6} className="p-6 text-slate-500">No ingestion jobs are currently recorded.</td></tr>}
+          {!loading && jobs.length === 0 && <tr><td colSpan={6} className="p-6 text-slate-500">No ingestion jobs are currently recorded for this tenant.</td></tr>}
           {!loading && jobs.map(job => <tr key={job.id} className="align-top">
             <td className="p-4">
               <div className="truncate font-medium">{job.document_id}</div>
