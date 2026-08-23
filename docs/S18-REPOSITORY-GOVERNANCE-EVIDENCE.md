@@ -1,6 +1,6 @@
 # S18 Repository Governance Evidence
 
-Date: 2026-08-20
+Date: 2026-08-22
 
 ## Scope
 
@@ -89,11 +89,16 @@ acceptance criterion through the same normal merge endpoint used for valid PRs.
 
 ## Green Normal-Merge Probe
 
-The remaining S18 acceptance step is a green PR successfully merging through the
-same protected path after current required checks and an independent code-owner
-approval. PR #62 itself is the canonical green probe once its exact current head
-passes CI/Security, receives a current non-stale `@policedbc` approval, and
-GitHub accepts its normal merge.
+PR #62, `docs: record S18 governance safety`, is the canonical green-path probe.
+Its exact head `ad1347869a1a37e198b562f1540c9437d9f64b4b` passed CI run
+`32427833667` (CI #216) and Security run `32427833721` (Security #96). The PR
+then satisfied the protected review/code-owner path and merged normally to
+`main` as verified merge commit `c71da3da3277d3cdd5f37435b7274c6f8f595946`
+on 2026-08-22. No branch-protection setting, required check, or review rule was
+weakened for the merge.
+
+This closes the green-path half of S18 acceptance with GitHub-observable evidence
+from the same protected branch used for normal development.
 
 ## Acceptance Mapping
 
@@ -101,7 +106,9 @@ GitHub accepts its normal merge.
   #66, failed required `backend` check, exact-head merge rejection, and unmerged
   closure.
 - A green PR can proceed through the normal path after required review and code
-  owner gates are satisfied: pending successful protected merge of PR #62.
+  owner gates are satisfied: proven by PR #62 merging as
+  `c71da3da3277d3cdd5f37435b7274c6f8f595946` after exact-head CI #216 and
+  Security #96 succeeded.
 - Direct `main` pushes, force pushes, and branch deletion are disabled by policy.
 - Emergency changes use the documented hotfix process and must record any
   temporary governance change as explicit release evidence.
