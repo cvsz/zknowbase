@@ -20,10 +20,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     console.error("admin_auth_configuration_error", error);
   }
 
+  const adsenseScript = (
+    <script
+      async
+      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4971034675329740"
+      crossOrigin="anonymous"
+    />
+  );
+
   if (!session) {
     const oidcEnabled = Boolean((process.env.ZKB_OIDC_ISSUER ?? "").trim());
     return (
       <html lang="en">
+        <head>{adsenseScript}</head>
         <body>
           <LoginGate oidcEnabled={oidcEnabled} />
         </body>
@@ -33,6 +42,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang="en">
+      <head>{adsenseScript}</head>
       <body>
         <div className="flex min-h-screen">
           <Nav username={session.sub} role={session.role} />
