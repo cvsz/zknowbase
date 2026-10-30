@@ -1,8 +1,9 @@
+import logging
 from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
 
 from app.content_identity import file_document_id, sha256_content
 from app.core.config import Settings, get_settings
@@ -21,6 +22,7 @@ from app.tenant_queue_store import ActiveIngestionJobError
 from app.upload_security import UploadSecurity, UploadSecurityError
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -177,6 +179,7 @@ def enqueue_url(
 )
 def enqueue_reindex(
     doc_id: str,
+    request: Request,
     body: AsyncReindexRequest = Body(default_factory=AsyncReindexRequest),
     principal: Principal = Depends(require_scopes("knowledge:write")),
     settings: Settings = Depends(get_settings),
@@ -227,13 +230,24 @@ def enqueue_reindex(
             record.error = prior_error
             record.updated_at = prior_updated_at
             docs.upsert(record)
-        # Do not expose database/driver exception details to tenant callers.
-        # Log only the exception type; the message may contain internal paths or URLs.
-        import logging
-        logging.getLogger(__name__).error(
-            "reindex enqueue failed (%s)", type(exc).__name__
+        # Do not expose database/driver exception details to tenant callers or logs.
+        # Correlate the sanitized event without recording exception messages or tracebacks.
+        correlation_id = getattr(request.state, "request_id", None)
+        if not isinstance(correlation_id, str) or not correlation_id:
+            correlation_id = uuid4().hex
+        logger.error(
+            "reindex_enqueue_failed",
+            extra={
+                "event": "reindex_enqueue_failed",
+                "correlation_id": correlation_id,
+                "exception_type": type(exc).__name__,
+            },
         )
-        raise HTTPException(503, "Unable to queue reindex") from None
+        raise HTTPException(
+            503,
+            "Unable to queue reindex",
+            headers={"X-Request-ID": correlation_id},
+        ) from None
     INGESTION_JOBS.labels(outcome="enqueued").inc()
     return AsyncIngestResponse(document=record, job=job)
 
