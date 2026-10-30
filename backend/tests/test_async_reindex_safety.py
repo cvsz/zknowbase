@@ -95,6 +95,8 @@ def test_reindex_enqueue_failure_restores_exact_prior_document_state(monkeypatch
     )
 
     assert response.status_code == 503
+    assert response.json()["detail"] == "Unable to queue reindex"
+    assert "simulated durable queue failure" not in response.text
     restored = docs.get(original.id)
     assert restored is not None
     assert restored.status == original.status
