@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api import queue_routes
 from app.api.queue_routes import router as queue_router
 from app.api.routes import router as core_router
 from app.core.config import get_settings
@@ -302,3 +303,49 @@ def test_async_file_rejects_unsupported_type_before_queue(monkeypatch, tmp_path)
     assert response.status_code == 415
     assert client.get("/api/v1/ingest/jobs", headers=headers).json() == []
     get_settings.cache_clear()
+
+class _FailingQueue:
+    def enqueue(self, *args, **kwargs):
+        raise RuntimeError("SENTINEL_DATABASE_URL=postgresql://internal.invalid/private")
+
+    def active_for_document(self, document_id, tenant_id):
+        return False
+
+
+def test_async_file_queue_failure_does_not_disclose_backend_exception(monkeypatch, tmp_path, caplog):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(queue_routes, "ingestion_queue", lambda _settings: _FailingQueue())
+
+    with caplog.at_level("ERROR"):
+        response = client.post(
+            "/api/v1/ingest/async",
+            headers={"X-API-Key": "this-is-a-test-secret-key"},
+            files={"file": ("policy.md", b"# Leave policy", "text/markdown")},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Unable to queue ingestion"
+    assert response.headers.get("x-request-id")
+    assert "SENTINEL_DATABASE_URL" not in response.text
+    assert "internal.invalid" not in caplog.text
+    get_settings.cache_clear()
+
+
+def test_async_url_queue_failure_does_not_disclose_backend_exception(monkeypatch, tmp_path, caplog):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(queue_routes, "ingestion_queue", lambda _settings: _FailingQueue())
+
+    with caplog.at_level("ERROR"):
+        response = client.post(
+            "/api/v1/ingest/url/async",
+            headers={"X-API-Key": "this-is-a-test-secret-key"},
+            json={"url": "https://example.com/manual"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Unable to queue ingestion"
+    assert response.headers.get("x-request-id")
+    assert "SENTINEL_DATABASE_URL" not in response.text
+    assert "internal.invalid" not in caplog.text
+    get_settings.cache_clear()
+
