@@ -1,3 +1,4 @@
+import re
 import time
 import uuid
 
@@ -33,7 +34,12 @@ async def local_backup_barrier(request: Request, call_next):
 
 @app.middleware("http")
 async def request_observability(request: Request, call_next):
-    rid = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    candidate_rid = request.headers.get("X-Request-ID")
+    rid = (
+        candidate_rid
+        if candidate_rid and re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", candidate_rid)
+        else str(uuid.uuid4())
+    )
     request.state.request_id = rid
     started = time.perf_counter()
     status_code = 500
