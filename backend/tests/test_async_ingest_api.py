@@ -308,6 +308,9 @@ class _FailingQueue:
     def enqueue(self, *args, **kwargs):
         raise RuntimeError("SENTINEL_DATABASE_URL=postgresql://internal.invalid/private")
 
+    def enqueue_if_inactive(self, *args, **kwargs):
+        raise RuntimeError("SENTINEL_DATABASE_URL=postgresql://internal.invalid/private")
+
     def active_for_document(self, document_id, tenant_id):
         return False
 
@@ -347,5 +350,40 @@ def test_async_url_queue_failure_does_not_disclose_backend_exception(monkeypatch
     assert response.headers.get("x-request-id")
     assert "SENTINEL_DATABASE_URL" not in response.text
     assert "internal.invalid" not in caplog.text
+    get_settings.cache_clear()
+
+def test_async_reindex_queue_failure_does_not_disclose_backend_exception(monkeypatch, tmp_path, caplog):
+    client = _client(monkeypatch, tmp_path)
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    document_store(settings).upsert(
+        DocumentRecord(
+            id="doc-reindex-failure",
+            name="manual.md",
+            tenant_id="default",
+            source_type="url",
+            source_uri="https://example.com/manual",
+            status="ready",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    monkeypatch.setattr(queue_routes, "ingestion_queue", lambda _settings: _FailingQueue())
+
+    with caplog.at_level("ERROR"):
+        response = client.post(
+            "/api/v1/documents/doc-reindex-failure/reindex/async",
+            headers={"X-API-Key": "this-is-a-test-secret-key"},
+            json={"run_after_seconds": 0},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Unable to queue reindex"
+    assert response.headers.get("x-request-id")
+    assert "SENTINEL_DATABASE_URL" not in response.text
+    assert "internal.invalid" not in caplog.text
+    restored = document_store(get_settings()).get("doc-reindex-failure")
+    assert restored is not None
+    assert restored.status == "ready"
     get_settings.cache_clear()
 
