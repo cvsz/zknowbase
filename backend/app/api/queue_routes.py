@@ -25,12 +25,33 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _queue_unavailable(request: Request, operation: str, exc: Exception) -> HTTPException:
+    correlation_id = getattr(request.state, "request_id", None)
+    if not isinstance(correlation_id, str) or not correlation_id:
+        correlation_id = uuid4().hex
+    logger.error(
+        "ingestion_enqueue_failed",
+        extra={
+            "event": "ingestion_enqueue_failed",
+            "operation": operation,
+            "correlation_id": correlation_id,
+            "exception_type": type(exc).__name__,
+        },
+    )
+    return HTTPException(
+        503,
+        f"Unable to queue {operation}",
+        headers={"X-Request-ID": correlation_id},
+    )
+
+
 @router.post(
     "/ingest/async",
     response_model=AsyncIngestResponse,
     status_code=202,
 )
 async def enqueue_file(
+    request: Request,
     file: UploadFile = File(...),
     principal: Principal = Depends(require_scopes("knowledge:write")),
     settings: Settings = Depends(get_settings),
@@ -126,7 +147,7 @@ async def enqueue_file(
                 and current.status == "queued"
             ):
                 docs.delete(record.id)
-        raise HTTPException(503, f"Unable to queue ingestion: {exc}") from exc
+        raise _queue_unavailable(request, "ingestion", exc) from None
     INGESTION_JOBS.labels(outcome="enqueued").inc()
     return AsyncIngestResponse(document=record, job=job)
 
@@ -138,6 +159,7 @@ async def enqueue_file(
 )
 def enqueue_url(
     body: UrlIngestRequest,
+    request: Request,
     principal: Principal = Depends(require_scopes("knowledge:write")),
     settings: Settings = Depends(get_settings),
 ) -> AsyncIngestResponse:
@@ -168,7 +190,7 @@ def enqueue_url(
         INGESTION_JOBS.labels(outcome="enqueued").inc()
     except Exception as exc:
         docs.delete(record.id)
-        raise HTTPException(503, f"Unable to queue ingestion: {exc}") from exc
+        raise _queue_unavailable(request, "ingestion", exc) from None
     return AsyncIngestResponse(document=record, job=job)
 
 
