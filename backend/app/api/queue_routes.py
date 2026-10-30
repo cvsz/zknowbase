@@ -227,7 +227,13 @@ def enqueue_reindex(
             record.error = prior_error
             record.updated_at = prior_updated_at
             docs.upsert(record)
-        raise HTTPException(503, f"Unable to queue reindex: {exc}") from exc
+        # Do not expose database/driver exception details to tenant callers.
+        # Log only the exception type; the message may contain internal paths or URLs.
+        import logging
+        logging.getLogger(__name__).error(
+            "reindex enqueue failed (%s)", type(exc).__name__
+        )
+        raise HTTPException(503, "Unable to queue reindex") from None
     INGESTION_JOBS.labels(outcome="enqueued").inc()
     return AsyncIngestResponse(document=record, job=job)
 
