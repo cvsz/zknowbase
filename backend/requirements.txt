@@ -6,11 +6,11 @@ pydantic-settings==2.10.1
 python-multipart==0.0.31
 httpx==0.28.1
 qdrant-client==1.15.1
-pypdf==6.15.0
+pypdf==6.21.2
 beautifulsoup4==4.13.4
 langchain-text-splitters==1.1.2
 psycopg[binary,pool]==3.3.4
 cryptography==50.0.0
 prometheus-client==0.26.0
-opentelemetry-sdk==1.44.0
-opentelemetry-exporter-otlp-proto-http==1.44.0
+opentelemetry-sdk==1.45.1
+opentelemetry-exporter-otlp-proto-http==1.45.1
