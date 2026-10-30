@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
@@ -77,7 +78,8 @@ def test_cancel_scheduled_reindex_restores_prior_state_and_keeps_source(monkeypa
     get_settings.cache_clear()
 
 
-def test_reindex_enqueue_failure_restores_exact_prior_document_state(monkeypatch, tmp_path):
+def test_reindex_enqueue_failure_restores_exact_prior_document_state(monkeypatch, tmp_path, caplog):
+    caplog.set_level(logging.ERROR, logger="app.api.queue_routes")
     client = _client(monkeypatch, tmp_path)
     settings = get_settings()
     docs = document_store(settings)
@@ -85,7 +87,7 @@ def test_reindex_enqueue_failure_restores_exact_prior_document_state(monkeypatch
     docs.upsert(original)
 
     def fail_enqueue(self, *args, **kwargs):
-        raise RuntimeError("simulated durable queue failure")
+        raise RuntimeError("sentinel-private-database-url")
 
     monkeypatch.setattr(TenantIngestionQueue, "enqueue_if_inactive", fail_enqueue)
     response = client.post(
@@ -96,7 +98,19 @@ def test_reindex_enqueue_failure_restores_exact_prior_document_state(monkeypatch
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Unable to queue reindex"
-    assert "simulated durable queue failure" not in response.text
+    assert "sentinel-private-database-url" not in response.text
+    assert "sentinel-private-database-url" not in caplog.text
+    correlation_id = response.headers.get("X-Request-ID")
+    assert correlation_id
+    records = [
+        record
+        for record in caplog.records
+        if record.name == "app.api.queue_routes"
+        and getattr(record, "event", None) == "reindex_enqueue_failed"
+    ]
+    assert records
+    assert records[-1].correlation_id == correlation_id
+    assert records[-1].exception_type == "RuntimeError"
     restored = docs.get(original.id)
     assert restored is not None
     assert restored.status == original.status
