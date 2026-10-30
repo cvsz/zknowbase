@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from app.queue_store import SQLiteIngestionQueue
 
 
@@ -83,3 +85,29 @@ def test_sqlite_queue_reaps_terminal_expired_lease(tmp_path):
     assert changed[0].status == "failed"
     assert changed[0].error == "job lease expired"
     assert queue.active_for_document("doc-expired") is False
+
+
+def test_sqlite_queue_claim_skips_future_available_job(tmp_path):
+    queue = SQLiteIngestionQueue(tmp_path / "queue.db")
+    future = queue.now() + timedelta(hours=1)
+    job = queue.enqueue(
+        "doc-scheduled",
+        "url",
+        "https://example.com/scheduled",
+        available_at=future,
+    )
+
+    assert queue.active_for_document("doc-scheduled") is True
+    assert queue.claim_next("worker-a", lease_seconds=60) is None
+
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE ingestion_jobs SET available_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+            (job.id,),
+        )
+        conn.commit()
+
+    claimed = queue.claim_next("worker-a", lease_seconds=60)
+    assert claimed is not None
+    assert claimed.id == job.id
+    assert claimed.available_at is not None
