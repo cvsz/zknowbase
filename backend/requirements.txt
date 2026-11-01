@@ -6,7 +6,7 @@ pydantic-settings==2.10.1
 python-multipart==0.0.31
 httpx==0.28.1
 qdrant-client==1.15.1
-pypdf==6.15.0
+pypdf==6.16.1
 beautifulsoup4==4.13.4
 langchain-text-splitters==1.1.2
 psycopg[binary,pool]==3.3.4
