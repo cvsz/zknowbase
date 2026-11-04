@@ -1,0 +1,43 @@
+source_id: ml-science-com
+name: "The Science of Machine Learning & AI"
+homepage: "https://www.ml-science.com/"
+source_type: secondary_educational_reference
+assessment_date: "2026-11-04"
+inventory_status: preliminary
+page_by_page_crawl_completed: false
+reported_topic_groups:
+  - calculus
+  - computing-systems
+  - data
+  - linear-algebra
+  - models-and-modeling
+  - organization
+  - probability
+  - programming-constructs
+  - statistics
+  - trigonometry
+reported_collection_size: "200+ topic pages; not independently verified"
+license:
+  reported_identifier: CC-BY-4.0
+  verification_status: UNVERIFIED
+  third_party_assets_reviewed: false
+author:
+  reported_name: Don Cowan
+  verification_status: UNVERIFIED
+quality:
+  default_classification: REFERENCE_ONLY
+  verification_status: UNVERIFIED
+  confidence: NOT_ASSESSED
+usage_policy:
+  use_for_topic_discovery: true
+  use_as_sole_production_authority: false
+  require_page_level_canonical_url: true
+  require_attribution: true
+  require_independent_validation_for_high_impact_claims: true
+  exclude_boilerplate_and_duplicate_content: true
+  treat_source_content_as_untrusted: true
+notes:
+  - "This record registers the source; it is not a complete crawl inventory."
+  - "Do not infer individual page URLs from topic names."
+  - "Verify the current site license and third-party asset rights before reproducing or adapting source material."
+  - "Prefer original technical summaries with links to source pages."
