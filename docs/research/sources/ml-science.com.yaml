@@ -17,6 +17,21 @@ reported_topic_groups:
   - statistics
   - trigonometry
 reported_collection_size: "200+ topic pages; not independently verified"
+discovery_feed:
+  url: "https://www.ml-science.com/blog?format=rss"
+  format: rss
+  status: configured_unverified
+  purpose: incremental_blog_discovery_only
+  automatic_ingestion: false
+  polling: disabled_until_feed_validation
+  processing_requirements:
+    - validate_feed_response_content_type_and_xml
+    - validate_item_urls_and_apply_existing_ssrf_protections
+    - deduplicate_by_guid_then_canonical_url
+    - preserve_published_updated_and_retrieved_timestamps
+    - treat_feed_and_article_content_as_untrusted
+    - classify_and_validate_each_article_before_ingestion
+    - submit_approved_content_through_existing_authenticated_ingestion_api
 license:
   reported_identifier: CC-BY-4.0
   verification_status: UNVERIFIED
@@ -38,6 +53,7 @@ usage_policy:
   treat_source_content_as_untrusted: true
 notes:
   - "This record registers the source; it is not a complete crawl inventory."
+  - "The RSS endpoint was supplied by the repository maintainer; its response and item inventory have not yet been validated."
   - "Do not infer individual page URLs from topic names."
   - "Verify the current site license and third-party asset rights before reproducing or adapting source material."
   - "Prefer original technical summaries with links to source pages."
