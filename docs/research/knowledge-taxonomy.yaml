@@ -1,0 +1,191 @@
+schema_version: 1
+taxonomy_id: zeazdev-ml-ai-foundations
+title: "ZEAZDEV Machine Learning and AI Knowledge Taxonomy"
+status: curated_taxonomy_not_source_inventory
+source_pack: ml-science-com
+domains:
+  - id: mathematics
+    priority: P0
+    topics:
+      - calculus
+      - derivatives
+      - gradients
+      - gradient-descent
+      - linear-algebra
+      - vectors
+      - matrices
+      - eigenvalues
+      - probability
+      - entropy
+      - cross-entropy
+      - information-theory
+  - id: machine-learning
+    priority: P0
+    topics:
+      - supervised-learning
+      - unsupervised-learning
+      - reinforcement-learning
+      - classification
+      - regression
+      - clustering
+      - anomaly-detection
+      - decision-trees
+      - random-forests
+      - gradient-boosting
+      - support-vector-machines
+      - regularization
+      - bias-variance
+      - neural-networks
+      - cnn
+      - rnn
+      - lstm
+      - transformers
+      - model-training
+      - model-evaluation
+  - id: foundation-models
+    priority: P0
+    topics:
+      - tokenization
+      - embeddings
+      - positional-encoding
+      - attention
+      - transformer-architecture
+      - pretraining
+      - instruction-tuning
+      - alignment
+      - inference
+      - generative-models
+      - diffusion-models
+  - id: ai-agents
+    priority: P0
+    topics:
+      - agent-architecture
+      - agent-state
+      - planning
+      - task-decomposition
+      - reasoning
+      - tool-use
+      - agent-coordination
+      - multi-agent-systems
+      - agent-evaluation
+      - authorization
+      - human-approval
+      - failure-recovery
+  - id: rag-knowledge-systems
+    priority: P0
+    topics:
+      - document-parsing
+      - document-normalization
+      - chunking
+      - metadata
+      - dense-retrieval
+      - sparse-retrieval
+      - hybrid-retrieval
+      - vector-search
+      - reranking
+      - context-assembly
+      - citation-grounding
+      - retrieval-evaluation
+      - tenant-aware-retrieval
+      - provenance
+      - deduplication
+      - knowledge-versioning
+  - id: data-engineering
+    priority: P0
+    topics:
+      - data-ingestion
+      - data-validation
+      - etl
+      - elt
+      - data-pipelines
+      - relational-databases
+      - document-databases
+      - graph-databases
+      - vector-databases
+      - data-warehouses
+      - data-lakes
+      - data-lakehouses
+      - data-lineage
+      - data-quality
+  - id: ai-governance-security
+    priority: P0
+    topics:
+      - ai-governance
+      - risk-assessment
+      - fairness
+      - bias
+      - explainability
+      - interpretability
+      - privacy
+      - access-control
+      - auditability
+      - human-oversight
+      - incident-response
+  - id: computing-infrastructure
+    priority: P0
+    topics:
+      - client-server
+      - api-architecture
+      - networking
+      - distributed-systems
+      - containers
+      - orchestration
+      - cloud-computing
+      - self-hosted-infrastructure
+      - gpu-computing
+      - model-serving
+      - scalability
+      - reliability
+  - id: statistics-evaluation
+    priority: P1
+    topics:
+      - descriptive-statistics
+      - probability-distributions
+      - correlation
+      - confidence-intervals
+      - hypothesis-testing
+      - precision
+      - recall
+      - f1-score
+      - confusion-matrix
+      - ab-testing
+      - experimental-design
+      - statistical-power
+  - id: software-engineering
+    priority: P1
+    topics:
+      - data-structures
+      - algorithms
+      - algorithmic-complexity
+      - hashing
+      - graph-traversal
+      - dynamic-programming
+      - greedy-algorithms
+      - abstraction
+      - encapsulation
+      - modular-design
+      - error-handling
+      - testing
+  - id: emerging-claims
+    priority: validation_required
+    classification: KEEP_WITH_VALIDATION
+    topics:
+      - agi
+      - asi
+      - artificial-universal-intelligence
+      - recursive-self-improvement
+      - deep-reasoning-capability-claims
+      - autonomous-agent-capability-claims
+      - ai-capability-forecasts
+ingestion_policy:
+  source_type: secondary
+  default_verification_status: UNVERIFIED
+  require_canonical_page_url: true
+  require_retrieval_timestamp: true
+  require_content_hash: true
+  require_deduplication: true
+  require_attribution_review: true
+  require_independent_evidence_for_high_impact_claims: true
+  treat_source_content_as_untrusted: true
+  use_existing_authenticated_ingestion_api: true
+  direct_vector_store_writes_allowed: false
