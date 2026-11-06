@@ -52,7 +52,9 @@ jobs:
       - name: Run auto-fix checks
         id: autofix
         run: |
-          echo "FIX_COUNT=0" >> $GITHUB_ENV
+          FIX_COUNT=0
+
+          # Check for secret-bearing files
           SECRET_FILES="$(git ls-files | grep -E '(^|/)(\.env$|id_rsa|id_ed25519|.*\.pem|.*\.key)$' | grep -v '^\.env\.example$' || true)"
           if [ -n "$SECRET_FILES" ]; then
             echo "Found secret-bearing files: $SECRET_FILES"
@@ -60,17 +62,19 @@ jobs:
               [ -z "$f" ] && continue
               git rm --cached "$f" >/dev/null 2>&1 && echo "Removed $f from tracking"
             done
-            FIX_COUNT=$(($(echo "$SECRET_FILES" | wc -l) + ${FIX_COUNT:-0}))
-            echo "FIX_COUNT=$FIX_COUNT" >> $GITHUB_ENV
+            SECRET_COUNT=$(echo "$SECRET_FILES" | grep -c .)
+            FIX_COUNT=$((FIX_COUNT + SECRET_COUNT))
           fi
+
+          # Check for missing .gitignore
           if [ ! -f .gitignore ]; then
             echo "Creating .gitignore"
             printf '# Environment files\n.env\n.env.local\n.env.*\n\n# Python\n__pycache__/\n*.pyc\n*.pyo\n*.pyd\n.Python\nenv/\nvenv/\n.venv/\n.ENV\npip-log.txt\npip-delete-this-directory.txt\n.tox/\n.coverage\n.coverage.*\n.cache\n\n# OS\n.DS_Store\nThumbs.db\n\n# IDE\n.vscode/\n.idea/\n*.swp\n*.swo\n*.tmp\n' > .gitignore
-            FIX_COUNT=$(($FIX_COUNT + 1))
-            echo "FIX_COUNT=$FIX_COUNT" >> $GITHUB_ENV
+            FIX_COUNT=$((FIX_COUNT + 1))
           fi
-          python3 /tmp/validate_yaml.py 2>/dev/null || true
-          echo "VALIDATE_DONE" >> $GITHUB_ENV
+
+          echo "FIX_COUNT=$FIX_COUNT" >> $GITHUB_ENV
+          echo "Fixes applied: $FIX_COUNT"
 
       - name: Commit and push fixes
         if: env.FIX_COUNT > 0
