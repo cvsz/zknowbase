@@ -241,11 +241,11 @@ Release evidence: release-candidate commit `e9ea3d69fca21bf21b3323cd289f1b5edab3
 - [x] add CODEOWNERS/reviewer ownership for backend security, frontend auth, operations, and release-sensitive paths where appropriate
 - [x] document release/tag provenance and post-release hotfix procedure
 - [x] record GitHub-observable evidence that a deliberately failing PR cannot merge through the normal path
-- [ ] record GitHub-observable evidence that a green PR can merge through the normal path
+- [x] record GitHub-observable evidence that a green PR can merge through the normal path
 
 Acceptance: a deliberately failing PR cannot merge through the normal path, a green PR can merge, and the governance configuration is recorded as release evidence.
 
-Evidence status: failing-path proven by PR #66 at head `131a45b375da41bc978d826d8da361b415786afe`: required `backend` failed in CI run `32427160455`, GitHub rejected an exact-head normal merge attempt with HTTP 405 citing both the failing required check and missing approving review, and PR #66 was closed unmerged. Green-path evidence remains pending successful protected merge of PR #62 with current exact-head checks and non-stale approval. See `docs/S18-REPOSITORY-GOVERNANCE-EVIDENCE.md` and `docs/RELEASE-SAFETY.md`.
+Evidence status: failing-path proven by PR #66 at head `131a45b375da41bc978d826d8da361b415786afe`: required `backend` failed in CI run `32427160455`, GitHub rejected an exact-head normal merge attempt with HTTP 405 citing both the failing required check and missing approving review, and PR #66 was closed unmerged. Green-path proven by PR #62 at head `ad1347869a1a37e198b562f1540c9437d9f64b4b`: exact-head CI run `32427833667` (CI #216) and Security run `32427833721` (Security #96) succeeded, and GitHub merged the PR through the protected normal path as `c71da3da3277d3cdd5f37435b7274c6f8f595946`. See `docs/S18-REPOSITORY-GOVERNANCE-EVIDENCE.md` and `docs/RELEASE-SAFETY.md`.
 
 ### S19 — Native portable-backup confidentiality
 - [x] add optional native authenticated encryption for portable backup archives using an established reviewed cryptographic library
