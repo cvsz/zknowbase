@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from typing import Protocol
+from uuid import uuid4
 
 from psycopg_pool import ConnectionPool
 
 from app.models.schemas import IngestionJobRecord
+
+
+class ActiveIngestionJobError(RuntimeError):
+    """Raised when an atomic enqueue observes an existing active job."""
 
 
 class BaseIngestionQueue(Protocol):
@@ -15,6 +21,7 @@ class BaseIngestionQueue(Protocol):
         source_type: str,
         source_uri: str,
         max_attempts: int = 3,
+        available_at: datetime | None = None,
     ) -> IngestionJobRecord: ...
 
     def get(self, job_id: str) -> IngestionJobRecord | None: ...
@@ -31,10 +38,10 @@ class BaseIngestionQueue(Protocol):
 class TenantIngestionQueue:
     """Durably binds ingestion jobs to a server-authoritative tenant.
 
-    The existing queue implementation retains lease/retry/concurrency semantics. Tenant
-    ownership lives in a companion table so existing SQLite/Postgres queues can migrate
-    without rewriting active jobs. Legacy jobs are deterministically assigned to the
-    configured default tenant when first observed.
+    Tenant ownership is stored beside the existing queue rows. New jobs are inserted
+    together with their tenant binding in one database transaction so an authenticated
+    enqueue can never leave behind a durable unowned job. Legacy rows that predate the
+    tenant table retain the documented deterministic default-tenant migration behavior.
     """
 
     def __init__(
@@ -68,6 +75,16 @@ class TenantIngestionQueue:
                     "CREATE INDEX IF NOT EXISTS idx_ingestion_job_tenants_tenant "
                     "ON ingestion_job_tenants(tenant_id)"
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS ingestion_job_reindex_state (
+                      job_id TEXT PRIMARY KEY,
+                      prior_status TEXT NOT NULL,
+                      prior_error TEXT,
+                      prior_updated_at TIMESTAMPTZ NOT NULL
+                    )
+                    """
+                )
             return
         assert self.sqlite_path is not None
         with sqlite3.connect(self.sqlite_path, timeout=5.0) as conn:
@@ -83,7 +100,185 @@ class TenantIngestionQueue:
                 "CREATE INDEX IF NOT EXISTS idx_ingestion_job_tenants_tenant "
                 "ON ingestion_job_tenants(tenant_id)"
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ingestion_job_reindex_state (
+                  job_id TEXT PRIMARY KEY,
+                  prior_status TEXT NOT NULL,
+                  prior_error TEXT,
+                  prior_updated_at TEXT NOT NULL
+                )
+                """
+            )
             conn.commit()
+
+    @staticmethod
+    def _new_record(
+        job_id: str,
+        document_id: str,
+        source_type: str,
+        source_uri: str,
+        max_attempts: int,
+        available_at: datetime | None,
+        tenant_id: str,
+    ) -> IngestionJobRecord:
+        now = datetime.now(timezone.utc)
+        return IngestionJobRecord(
+            id=job_id,
+            document_id=document_id,
+            tenant_id=tenant_id,
+            source_type=source_type,
+            source_uri=source_uri,
+            status="queued",
+            attempts=0,
+            max_attempts=max_attempts,
+            available_at=available_at,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def _enqueue_bound(
+        self,
+        document_id: str,
+        source_type: str,
+        source_uri: str,
+        max_attempts: int,
+        available_at: datetime | None,
+        tenant_id: str,
+        *,
+        require_inactive: bool,
+        prior_status: str | None = None,
+        prior_error: str | None = None,
+        prior_updated_at: datetime | None = None,
+    ) -> IngestionJobRecord:
+        job_id = str(uuid4())
+        record = self._new_record(
+            job_id,
+            document_id,
+            source_type,
+            source_uri,
+            max_attempts,
+            available_at,
+            tenant_id,
+        )
+        if self.postgres_pool is not None:
+            with self.postgres_pool.connection() as conn:
+                with conn.transaction():
+                    if require_inactive:
+                        conn.execute(
+                            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                            (f"{tenant_id}\0{document_id}",),
+                        )
+                        active = conn.execute(
+                            """
+                            SELECT 1
+                            FROM ingestion_jobs AS j
+                            JOIN ingestion_job_tenants AS t ON t.job_id=j.id
+                            WHERE j.document_id=%s AND t.tenant_id=%s
+                              AND j.status IN ('queued','processing')
+                            LIMIT 1
+                            """,
+                            (document_id, tenant_id),
+                        ).fetchone()
+                        if active:
+                            raise ActiveIngestionJobError("Document has an active ingestion job")
+                    conn.execute(
+                        "INSERT INTO ingestion_job_tenants (job_id,tenant_id) VALUES (%s,%s)",
+                        (job_id, tenant_id),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO ingestion_jobs
+                        (id,document_id,source_type,source_uri,status,attempts,max_attempts,
+                         worker_id,lease_expires_at,available_at,created_at,updated_at,error)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        """,
+                        (
+                            job_id,
+                            document_id,
+                            source_type,
+                            source_uri,
+                            "queued",
+                            0,
+                            max_attempts,
+                            None,
+                            None,
+                            available_at,
+                            record.created_at,
+                            record.updated_at,
+                            None,
+                        ),
+                    )
+                    if prior_status is not None and prior_updated_at is not None:
+                        conn.execute(
+                            """
+                            INSERT INTO ingestion_job_reindex_state
+                            (job_id,prior_status,prior_error,prior_updated_at)
+                            VALUES (%s,%s,%s,%s)
+                            """,
+                            (job_id, prior_status, prior_error, prior_updated_at),
+                        )
+            return record
+
+        assert self.sqlite_path is not None
+        with sqlite3.connect(self.sqlite_path, timeout=5.0) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                if require_inactive:
+                    active = conn.execute(
+                        """
+                        SELECT 1
+                        FROM ingestion_jobs AS j
+                        JOIN ingestion_job_tenants AS t ON t.job_id=j.id
+                        WHERE j.document_id=? AND t.tenant_id=?
+                          AND j.status IN ('queued','processing')
+                        LIMIT 1
+                        """,
+                        (document_id, tenant_id),
+                    ).fetchone()
+                    if active:
+                        raise ActiveIngestionJobError("Document has an active ingestion job")
+                conn.execute(
+                    "INSERT INTO ingestion_job_tenants (job_id,tenant_id) VALUES (?,?)",
+                    (job_id, tenant_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO ingestion_jobs
+                    (id,document_id,source_type,source_uri,status,attempts,max_attempts,
+                     worker_id,lease_expires_at,available_at,created_at,updated_at,error)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        job_id,
+                        document_id,
+                        source_type,
+                        source_uri,
+                        "queued",
+                        0,
+                        max_attempts,
+                        None,
+                        None,
+                        available_at.isoformat() if available_at is not None else None,
+                        record.created_at.isoformat(),
+                        record.updated_at.isoformat(),
+                        None,
+                    ),
+                )
+                if prior_status is not None and prior_updated_at is not None:
+                    conn.execute(
+                        """
+                        INSERT INTO ingestion_job_reindex_state
+                        (job_id,prior_status,prior_error,prior_updated_at)
+                        VALUES (?,?,?,?)
+                        """,
+                        (job_id, prior_status, prior_error, prior_updated_at.isoformat()),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return record
 
     def _bind(self, job_id: str, tenant_id: str) -> None:
         if self.postgres_pool is not None:
@@ -145,20 +340,47 @@ class TenantIngestionQueue:
         source_type: str,
         source_uri: str,
         max_attempts: int = 3,
+        available_at: datetime | None = None,
         *,
         tenant_id: str | None = None,
     ) -> IngestionJobRecord:
-        """Queue a job while preserving the pre-tenant positional API.
-
-        Authenticated API callers pass tenant_id explicitly as a keyword. Internal legacy
-        callers that omit it migrate to the configured default tenant, matching the
-        documented single-tenant compatibility policy.
-        """
         effective_tenant = tenant_id or self.default_tenant_id
-        job = self.base.enqueue(document_id, source_type, source_uri, max_attempts)
-        self._bind(job.id, effective_tenant)
-        job.tenant_id = effective_tenant
-        return job
+        return self._enqueue_bound(
+            document_id,
+            source_type,
+            source_uri,
+            max_attempts,
+            available_at,
+            effective_tenant,
+            require_inactive=False,
+        )
+
+    def enqueue_if_inactive(
+        self,
+        document_id: str,
+        source_type: str,
+        source_uri: str,
+        max_attempts: int = 3,
+        available_at: datetime | None = None,
+        *,
+        tenant_id: str | None = None,
+        prior_status: str | None = None,
+        prior_error: str | None = None,
+        prior_updated_at: datetime | None = None,
+    ) -> IngestionJobRecord:
+        effective_tenant = tenant_id or self.default_tenant_id
+        return self._enqueue_bound(
+            document_id,
+            source_type,
+            source_uri,
+            max_attempts,
+            available_at,
+            effective_tenant,
+            require_inactive=True,
+            prior_status=prior_status,
+            prior_error=prior_error,
+            prior_updated_at=prior_updated_at,
+        )
 
     def get(self, job_id: str, tenant_id: str | None = None) -> IngestionJobRecord | None:
         job = self._attach(self.base.get(job_id))
@@ -176,10 +398,76 @@ class TenantIngestionQueue:
     def active_for_document(self, document_id: str, tenant_id: str | None = None) -> bool:
         if tenant_id is None:
             return self.base.active_for_document(document_id)
-        return any(
-            job.document_id == document_id and job.status in {"queued", "processing"}
-            for job in self.list(500, tenant_id)
-        )
+        if self.postgres_pool is not None:
+            with self.postgres_pool.connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT 1
+                    FROM ingestion_jobs AS j
+                    JOIN ingestion_job_tenants AS t ON t.job_id=j.id
+                    WHERE j.document_id=%s AND t.tenant_id=%s
+                      AND j.status IN ('queued','processing')
+                    LIMIT 1
+                    """,
+                    (document_id, tenant_id),
+                ).fetchone()
+            return row is not None
+        assert self.sqlite_path is not None
+        with sqlite3.connect(self.sqlite_path, timeout=5.0) as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM ingestion_jobs AS j
+                JOIN ingestion_job_tenants AS t ON t.job_id=j.id
+                WHERE j.document_id=? AND t.tenant_id=?
+                  AND j.status IN ('queued','processing')
+                LIMIT 1
+                """,
+                (document_id, tenant_id),
+            ).fetchone()
+        return row is not None
+
+    def reindex_prior_state(
+        self,
+        job_id: str,
+        tenant_id: str | None = None,
+    ) -> tuple[str, str | None, datetime] | None:
+        if tenant_id is not None and self.get(job_id, tenant_id) is None:
+            return None
+        if self.postgres_pool is not None:
+            with self.postgres_pool.connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT prior_status,prior_error,prior_updated_at
+                    FROM ingestion_job_reindex_state WHERE job_id=%s
+                    """,
+                    (job_id,),
+                ).fetchone()
+            if not row:
+                return None
+            return str(row["prior_status"]), row["prior_error"], row["prior_updated_at"]
+        assert self.sqlite_path is not None
+        with sqlite3.connect(self.sqlite_path, timeout=5.0) as conn:
+            row = conn.execute(
+                """
+                SELECT prior_status,prior_error,prior_updated_at
+                FROM ingestion_job_reindex_state WHERE job_id=?
+                """,
+                (job_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return str(row[0]), row[1], datetime.fromisoformat(str(row[2]))
+
+    def clear_reindex_state(self, job_id: str) -> None:
+        if self.postgres_pool is not None:
+            with self.postgres_pool.connection() as conn:
+                conn.execute("DELETE FROM ingestion_job_reindex_state WHERE job_id=%s", (job_id,))
+            return
+        assert self.sqlite_path is not None
+        with sqlite3.connect(self.sqlite_path, timeout=5.0) as conn:
+            conn.execute("DELETE FROM ingestion_job_reindex_state WHERE job_id=?", (job_id,))
+            conn.commit()
 
     def reap_expired(self) -> list[IngestionJobRecord]:
         return [job for job in (self._attach(item) for item in self.base.reap_expired()) if job is not None]

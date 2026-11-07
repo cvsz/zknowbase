@@ -1,11 +1,14 @@
 import threading
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api import queue_routes
 from app.api.queue_routes import router as queue_router
 from app.api.routes import router as core_router
 from app.core.config import get_settings
+from app.models.schemas import DocumentRecord
 from app.store import DocumentStore
 from app.store_factory import document_store, security_store
 
@@ -177,6 +180,83 @@ def test_async_url_is_queued_without_network_fetch(monkeypatch, tmp_path):
     get_settings.cache_clear()
 
 
+def test_async_reindex_schedules_existing_document(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    headers = {"X-API-Key": "this-is-a-test-secret-key"}
+    settings = get_settings()
+    docs = document_store(settings)
+    now = datetime.now(timezone.utc)
+    record = DocumentRecord(
+        id="doc-ready",
+        name="manual.md",
+        tenant_id="default",
+        source_type="file",
+        source_uri=str(tmp_path / "uploads" / "manual.md"),
+        content_type="text/markdown",
+        status="ready",
+        chunk_count=3,
+        size_bytes=42,
+        created_at=now,
+        updated_at=now,
+    )
+    docs.upsert(record)
+
+    response = client.post(
+        "/api/v1/documents/doc-ready/reindex/async",
+        headers=headers,
+        json={"run_after_seconds": 3600},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["document"]["id"] == "doc-ready"
+    assert payload["document"]["status"] == "queued"
+    assert payload["job"]["document_id"] == "doc-ready"
+    assert payload["job"]["tenant_id"] == "default"
+    assert payload["job"]["available_at"] is not None
+    assert client.post("/api/v1/documents/doc-ready/reindex/async", headers=headers).status_code == 409
+    get_settings.cache_clear()
+
+
+def test_async_reindex_is_tenant_scoped(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    settings = get_settings()
+    _record, beta_secret = security_store(settings).create_key(
+        "beta-writer",
+        ["knowledge:read", "knowledge:write"],
+        tenant_id="beta",
+    )
+    now = datetime.now(timezone.utc)
+    document_store(settings).upsert(
+        DocumentRecord(
+            id="beta-doc",
+            name="beta.md",
+            tenant_id="beta",
+            source_type="url",
+            source_uri="https://example.com/beta",
+            status="ready",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    assert (
+        client.post(
+            "/api/v1/documents/beta-doc/reindex/async",
+            headers={"X-API-Key": "this-is-a-test-secret-key"},
+        ).status_code
+        == 404
+    )
+    beta_response = client.post(
+        "/api/v1/documents/beta-doc/reindex/async",
+        headers={"X-API-Key": beta_secret},
+        json={"run_after_seconds": 0},
+    )
+    assert beta_response.status_code == 202
+    assert beta_response.json()["job"]["tenant_id"] == "beta"
+    get_settings.cache_clear()
+
+
 def test_async_jobs_are_tenant_scoped_and_client_cannot_forge_tenant(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     settings = get_settings()
@@ -223,3 +303,87 @@ def test_async_file_rejects_unsupported_type_before_queue(monkeypatch, tmp_path)
     assert response.status_code == 415
     assert client.get("/api/v1/ingest/jobs", headers=headers).json() == []
     get_settings.cache_clear()
+
+class _FailingQueue:
+    def enqueue(self, *args, **kwargs):
+        raise RuntimeError("SENTINEL_DATABASE_URL=postgresql://internal.invalid/private")
+
+    def enqueue_if_inactive(self, *args, **kwargs):
+        raise RuntimeError("SENTINEL_DATABASE_URL=postgresql://internal.invalid/private")
+
+    def active_for_document(self, document_id, tenant_id):
+        return False
+
+
+def test_async_file_queue_failure_does_not_disclose_backend_exception(monkeypatch, tmp_path, caplog):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(queue_routes, "ingestion_queue", lambda _settings: _FailingQueue())
+
+    with caplog.at_level("ERROR"):
+        response = client.post(
+            "/api/v1/ingest/async",
+            headers={"X-API-Key": "this-is-a-test-secret-key"},
+            files={"file": ("policy.md", b"# Leave policy", "text/markdown")},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Unable to queue ingestion"
+    assert response.headers.get("x-request-id")
+    assert "SENTINEL_DATABASE_URL" not in response.text
+    assert "internal.invalid" not in caplog.text
+    get_settings.cache_clear()
+
+
+def test_async_url_queue_failure_does_not_disclose_backend_exception(monkeypatch, tmp_path, caplog):
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(queue_routes, "ingestion_queue", lambda _settings: _FailingQueue())
+
+    with caplog.at_level("ERROR"):
+        response = client.post(
+            "/api/v1/ingest/url/async",
+            headers={"X-API-Key": "this-is-a-test-secret-key"},
+            json={"url": "https://example.com/manual"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Unable to queue ingestion"
+    assert response.headers.get("x-request-id")
+    assert "SENTINEL_DATABASE_URL" not in response.text
+    assert "internal.invalid" not in caplog.text
+    get_settings.cache_clear()
+
+def test_async_reindex_queue_failure_does_not_disclose_backend_exception(monkeypatch, tmp_path, caplog):
+    client = _client(monkeypatch, tmp_path)
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    document_store(settings).upsert(
+        DocumentRecord(
+            id="doc-reindex-failure",
+            name="manual.md",
+            tenant_id="default",
+            source_type="url",
+            source_uri="https://example.com/manual",
+            status="ready",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    monkeypatch.setattr(queue_routes, "ingestion_queue", lambda _settings: _FailingQueue())
+
+    with caplog.at_level("ERROR"):
+        response = client.post(
+            "/api/v1/documents/doc-reindex-failure/reindex/async",
+            headers={"X-API-Key": "this-is-a-test-secret-key"},
+            json={"run_after_seconds": 0},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Unable to queue reindex"
+    assert response.headers.get("x-request-id")
+    assert "SENTINEL_DATABASE_URL" not in response.text
+    assert "internal.invalid" not in caplog.text
+    restored = document_store(get_settings()).get("doc-reindex-failure")
+    assert restored is not None
+    assert restored.status == "ready"
+    get_settings.cache_clear()
+
