@@ -20,6 +20,8 @@ Answer only from the supplied organizational context. If the context is insuffic
 Do not invent policies, dates, requirements, or approvals. Cite sources inline using [S1], [S2], ... markers.
 Prefer concise, operationally useful answers."""
 
+_HYBRID_CANDIDATE_CEILING = 100
+
 
 class RAGService:
     def __init__(self, settings: Settings):
@@ -44,18 +46,35 @@ class RAGService:
                 query_vector = (await self.providers.embed([query]))[0]
             if self.settings.retrieval_mode == "dense":
                 return await self.vectors.search(tenant_id, query_vector, top_k, filters)
+
             candidate_limit = max(
-                top_k, min(100, top_k * self.settings.hybrid_candidate_multiplier)
-            )
-            candidates = await self.vectors.search(
-                tenant_id, query_vector, candidate_limit, filters
-            )
-            return rerank_hybrid(
-                query,
-                candidates,
                 top_k,
-                dense_weight=self.settings.hybrid_dense_weight,
+                min(
+                    _HYBRID_CANDIDATE_CEILING,
+                    top_k * self.settings.hybrid_candidate_multiplier,
+                ),
             )
+            while True:
+                candidates = await self.vectors.search(
+                    tenant_id, query_vector, candidate_limit, filters
+                )
+                reranked = rerank_hybrid(
+                    query,
+                    candidates,
+                    top_k,
+                    dense_weight=self.settings.hybrid_dense_weight,
+                    document_level_cutoff=True,
+                )
+                if (
+                    len(reranked) >= top_k
+                    or len(candidates) < candidate_limit
+                    or candidate_limit >= _HYBRID_CANDIDATE_CEILING
+                ):
+                    return reranked
+                candidate_limit = min(
+                    _HYBRID_CANDIDATE_CEILING,
+                    max(candidate_limit + 1, candidate_limit * 2),
+                )
 
     @staticmethod
     def _prompt(question: str, sources: list[SourceCitation]) -> str:

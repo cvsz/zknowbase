@@ -1,9 +1,14 @@
 import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.models.schemas import SourceCitation
 from app.rag.evaluation import RetrievalEvalCase, evaluate_rankings, load_eval_dataset
+from app.rag.hybrid import rerank_hybrid
+from app.rag.service import RAGService
+from scripts.evaluate_retrieval import _dense_production_candidates, _rerank_production_candidates
 
 
 def _citation(document_id: str, *, tenant_id: str = "acme", score: float = 0.9) -> SourceCitation:
@@ -57,6 +62,91 @@ def test_evaluation_deduplicates_document_chunks_for_document_metrics():
     assert result.recall_at_k == pytest.approx(1.0)
     assert result.mrr == pytest.approx(1.0)
     assert result.ndcg_at_k == pytest.approx(1.0)
+
+
+def test_dense_evaluator_matches_production_chunk_cutoff_before_document_metrics():
+    first = _citation("doc-a", score=0.99)
+    duplicate = first.model_copy(update={"chunk_id": "doc-a-1", "chunk_index": 1, "score": 0.98})
+    outside_cutoff = _citation("doc-b", score=0.97)
+
+    dense = _dense_production_candidates(
+        [first, duplicate, outside_cutoff],
+        top_k=2,
+    )
+
+    assert [citation.document_id for citation in dense] == ["doc-a", "doc-a"]
+
+
+def test_hybrid_evaluator_expands_bounded_dense_prefix_for_unique_documents():
+    first = _citation("doc-a", score=0.99).model_copy(update={"text": "policy policy"})
+    duplicate = first.model_copy(update={"chunk_id": "doc-a-1", "chunk_index": 1, "score": 0.98})
+    second = _citation("doc-b", score=0.97).model_copy(update={"text": "policy"})
+
+    reranked = _rerank_production_candidates(
+        "policy",
+        [first, duplicate, second],
+        top_k=2,
+        dense_weight=1.0,
+        candidate_multiplier=1,
+    )
+
+    assert [citation.document_id for citation in reranked] == ["doc-a", "doc-b"]
+
+
+def test_hybrid_evaluator_ignores_candidates_outside_sufficient_production_prefix():
+    first = _citation("doc-a", score=0.99).model_copy(update={"text": "policy"})
+    second = _citation("doc-b", score=0.98).model_copy(update={"text": "policy"})
+    outside_prefix = _citation("doc-c", score=0.97).model_copy(update={"text": "policy policy policy"})
+
+    reranked = _rerank_production_candidates(
+        "policy",
+        [first, second, outside_prefix],
+        top_k=2,
+        dense_weight=0.0,
+        candidate_multiplier=1,
+    )
+
+    assert [citation.document_id for citation in reranked] == ["doc-a", "doc-b"]
+
+
+def test_hybrid_document_level_cutoff_skips_duplicate_chunks():
+    first = _citation("doc-a", score=0.99).model_copy(update={"text": "policy policy"})
+    duplicate = first.model_copy(update={"chunk_id": "doc-a-1", "chunk_index": 1, "score": 0.98})
+    second = _citation("doc-b", score=0.97).model_copy(update={"text": "policy"})
+
+    reranked = rerank_hybrid(
+        "policy",
+        [first, duplicate, second],
+        2,
+        dense_weight=1.0,
+        document_level_cutoff=True,
+    )
+
+    assert [citation.document_id for citation in reranked] == ["doc-a", "doc-b"]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_service_adaptively_overfetches_until_top_k_unique_documents():
+    first = _citation("doc-a", score=0.99).model_copy(update={"text": "policy policy"})
+    duplicate = first.model_copy(update={"chunk_id": "doc-a-1", "chunk_index": 1, "score": 0.98})
+    second = _citation("doc-b", score=0.97).model_copy(update={"text": "policy"})
+
+    service = RAGService.__new__(RAGService)
+    service.settings = SimpleNamespace(
+        embedding_provider="ollama",
+        retrieval_mode="hybrid",
+        hybrid_candidate_multiplier=1,
+        hybrid_dense_weight=1.0,
+    )
+    service.providers = SimpleNamespace(embed=AsyncMock(return_value=[[0.1]]))
+    service.vectors = SimpleNamespace(
+        search=AsyncMock(side_effect=[[first, duplicate], [first, duplicate, second]])
+    )
+
+    result = await service.search("acme", "policy", 2)
+
+    assert [citation.document_id for citation in result] == ["doc-a", "doc-b"]
+    assert [call.args[2] for call in service.vectors.search.await_args_list] == [2, 4]
 
 
 def test_evaluation_rejects_cross_tenant_citations():
